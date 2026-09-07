@@ -231,7 +231,7 @@ export function searchStations(
   const seen = new Set<string>();
   const out: StationHit[] = [];
   for (const { hit } of ranked) {
-    const k = `${hit.name}|${hit.prefecture}`;
+    const k = `${hit.name}|${hit.lng.toFixed(3)}|${hit.lat.toFixed(3)}`;
     if (seen.has(k)) continue;
     seen.add(k);
     out.push(hit);

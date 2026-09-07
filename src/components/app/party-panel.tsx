@@ -270,7 +270,7 @@ export function PartyWindow() {
       }
     };
     void load();
-    const id = window.setInterval(load, 1200);
+    const id = window.setInterval(load, 1800);
     return () => {
       live = false;
       window.clearInterval(id);

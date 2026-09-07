@@ -3163,7 +3163,8 @@ export function CanvasMap() {
       bounds: { west: number; south: number; east: number; north: number },
     ) => {
       const journey = useMapStore.getState().journey;
-      const key = `${cam.lng.toFixed(4)}|${cam.lat.toFixed(4)}|${cam.zoom.toFixed(3)}|${cam.yaw.toFixed(3)}|${cam.tilt.toFixed(3)}|${useMapStore.getState().pitchMode}|${w}|${h}|${journey?.dest.name ?? ""}|${lineRef.current.length}|${useMapStore.getState().selectedTrain?.id ?? ""}|${useMapStore.getState().selectedStation?.name ?? ""}|${useMapStore.getState().selectedStay?.id ?? ""}|${useMapStore.getState().stayLayer ? 1 : 0}|${useMapStore.getState().stayWalk ? 1 : 0}|${useMapStore.getState().selectedKonbini?.id ?? ""}|${useMapStore.getState().konbiniBrand ?? ""}|${useMapStore.getState().konbiniStores.length}|${useMapStore.getState().konbiniWalk ? 1 : 0}|${useMapStore.getState().lang}|${useMapStore.getState().radarEnabled ? 1 : 0}|${useMapStore.getState().mountainLayer ? 1 : 0}|${SLAB_FACES ? 1 : 0}`;
+      const loose = Boolean(drag.current) || Boolean(camLerpRef.current);
+      const key = `${cam.lng.toFixed(loose ? 3 : 4)}|${cam.lat.toFixed(loose ? 3 : 4)}|${cam.zoom.toFixed(loose ? 2 : 3)}|${cam.yaw.toFixed(loose ? 2 : 3)}|${cam.tilt.toFixed(loose ? 2 : 3)}|${useMapStore.getState().pitchMode}|${w}|${h}|${journey?.dest.name ?? ""}|${lineRef.current.length}|${useMapStore.getState().selectedTrain?.id ?? ""}|${useMapStore.getState().selectedStation?.name ?? ""}|${useMapStore.getState().selectedStay?.id ?? ""}|${useMapStore.getState().stayLayer ? 1 : 0}|${useMapStore.getState().stayWalk ? 1 : 0}|${useMapStore.getState().selectedKonbini?.id ?? ""}|${useMapStore.getState().konbiniBrand ?? ""}|${useMapStore.getState().konbiniStores.length}|${useMapStore.getState().konbiniWalk ? 1 : 0}|${useMapStore.getState().lang}|${useMapStore.getState().radarEnabled ? 1 : 0}|${useMapStore.getState().mountainLayer ? 1 : 0}|${SLAB_FACES ? 1 : 0}`;
       if (key === baseKey) return;
       baseKey = key;
       applyTransform(bg, sizeRef.current.dpr);
@@ -3381,6 +3382,7 @@ export function CanvasMap() {
 
     const draw = (ts: number) => {
       raf = requestAnimationFrame(draw);
+      if (typeof document !== "undefined" && document.hidden) return;
       try {
         if (!bootHid) {
           bootHid = true;
@@ -3491,8 +3493,10 @@ export function CanvasMap() {
             yaw: anim.syaw + (anim.tyaw - anim.syaw) * e,
             tilt: anim.stilt + (anim.ttilt - anim.stilt) * e,
           };
-          setTiltUi(camRef.current.tilt);
-          if (u >= 1) camLerpRef.current = null;
+          if (u >= 1) {
+            camLerpRef.current = null;
+            setTiltUi(camRef.current.tilt);
+          }
         }
         if (introDoneRef.current) rememberCam(camRef.current);
         const span = Math.max(1.4, 26 / 2 ** Math.max(0, camRef.current.zoom - 5));
@@ -3543,7 +3547,8 @@ export function CanvasMap() {
         }
 
         const followId = useMapStore.getState().followTrainId;
-        const simDue = ts - lastSim > (followId ? 80 : 140);
+        const busyCam = Boolean(drag.current) || Boolean(camLerpRef.current);
+        const simDue = ts - lastSim > (followId && !busyCam ? 90 : busyCam ? 280 : 150);
         if (simDue) {
           lastSim = ts;
           const station = useMapStore.getState().selectedStation;
@@ -3561,7 +3566,7 @@ export function CanvasMap() {
             trainsRef.current = liveRaw.filter((t) => t.kind === "flight");
           } else {
           const now = simNow();
-          const cap = z < 5.5 ? 0 : z >= 15.6 ? 50000 : z >= 13.8 ? 8000 : z >= 12 ? 2800 : z >= 10 ? 1800 : z >= 8 ? 1100 : 520;
+          const cap = z < 5.5 ? 0 : z >= 15.6 ? 2200 : z >= 13.8 ? 1600 : z >= 12 ? 1400 : z >= 10 ? 1100 : z >= 8 ? 800 : 420;
           const liveRaw = useMapStore.getState().viewTime ? [] : useMapStore.getState().liveTrains;
           const snap = liveRaw.filter((t) => t.kind !== "bus" && (t.kind === "flight" || z >= 6));
           const fresh = lastLiveSnapRef.current !== liveRaw;
@@ -3685,7 +3690,7 @@ export function CanvasMap() {
         ctx.save();
         ctx.globalAlpha = stayFade;
         const mountainOnNow = useMapStore.getState().mountainLayer;
-        if (!mountainOnNow) drawMarineLife(ctx, camRef.current, w, h, ts, bounds);
+        if (!mountainOnNow && camRef.current.zoom < 11.6) drawMarineLife(ctx, camRef.current, w, h, ts, bounds);
         const wxSpots = useMapStore.getState().weatherSpots;
         const wxNow = nearestWeather(wxSpots, camRef.current.lng, camRef.current.lat);
         const veil = !mountainOnNow && wxNow ? weatherVeil(wxNow.kind, wxNow.intensity, camRef.current.zoom) : null;
@@ -3693,7 +3698,7 @@ export function CanvasMap() {
           ctx.fillStyle = veil;
           ctx.fillRect(0, 0, w, h);
         }
-        drawClouds(ctx, camRef.current, w, h, ts);
+        if (camRef.current.zoom < 13.4) drawClouds(ctx, camRef.current, w, h, ts);
         {
           const st = useMapStore.getState();
             drawRadarLayer(
@@ -4545,7 +4550,6 @@ export function CanvasMap() {
         } else {
           keepJapanInView(camRef.current);
         }
-        baseKey = "";
         return;
       }
       const dx = e.clientX - d.x;
@@ -4561,7 +4565,6 @@ export function CanvasMap() {
       camRef.current.lng = d.lng;
       camRef.current.lat = d.lat;
       panCam(camRef.current, dx, dy, panGain(camRef.current.zoom));
-      baseKey = "";
     };
 
     const onPointerUp = (e: PointerEvent) => {
@@ -4586,6 +4589,7 @@ export function CanvasMap() {
         }
         drag.current = null;
         mapGesture = false;
+        baseKey = "";
         setZoomUi(camRef.current.zoom);
       }
     };

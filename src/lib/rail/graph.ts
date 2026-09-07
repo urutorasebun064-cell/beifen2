@@ -296,7 +296,7 @@ export function locateStation(
         (a, b) => Math.hypot(a.lng - fallback.lng, a.lat - fallback.lat) - Math.hypot(b.lng - fallback.lng, b.lat - fallback.lat),
       );
       const closest = matches[0]!;
-      if (Math.hypot(closest.lng - fallback.lng, closest.lat - fallback.lat) < 0.25) return closest;
+      if (Math.hypot(closest.lng - fallback.lng, closest.lat - fallback.lat) < 0.08) return closest;
       return { name: fallback.name || closest.name, lng: fallback.lng, lat: fallback.lat, prefecture: fallback.prefecture };
     }
     return matches[0]!;
@@ -662,6 +662,20 @@ export function attachTrack(journey: Journey, lines: LineRuntime[], index: Map<s
   return { ...journey, legs };
 }
 
+function pinHit(hits: StationHit[], fallback: StationHit | null) {
+  if (!fallback || !Number.isFinite(fallback.lng) || !Number.isFinite(fallback.lat)) return null;
+  let best: StationHit | null = null;
+  let bestD = 0.05;
+  for (const hit of hits) {
+    const d = Math.hypot(hit.lng - fallback.lng, hit.lat - fallback.lat);
+    if (d < bestD) {
+      bestD = d;
+      best = hit;
+    }
+  }
+  return best;
+}
+
 export function resolveStationQuery(
   index: Map<string, StationHit>,
   query: string,
@@ -674,11 +688,15 @@ export function resolveStationQuery(
     return { match: fallback, suggestions };
   }
   const hub = hubNameFor(q);
-  const hits = searchStations(index, hub ?? q, 12, near);
+  const hits = searchStations(index, hub ?? q, 16, near);
   if (hits[0] && (hits[0].name === (hub ?? q) || hits[0].name.startsWith(hub ?? q) || (hub && hits[0].name === hub))) {
-    return { match: hits[0]!, suggestions: hits };
+    const pinned = pinHit(hits, fallback) ?? hits[0]!;
+    return { match: pinned, suggestions: hits };
   }
-  if (hits.length) return { match: hits[0]!, suggestions: hits };
+  if (hits.length) {
+    const pinned = pinHit(hits, fallback) ?? hits[0]!;
+    return { match: pinned, suggestions: hits };
+  }
   const hubsNear = HUBS.filter((h) => h.name.includes(q) || h.aliases.some((a) => a.includes(q) || q.toLowerCase().includes(a.toLowerCase()))).slice(0, 5);
   const fromHubs: StationHit[] = [];
   for (const h of hubsNear) {

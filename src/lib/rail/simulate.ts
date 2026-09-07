@@ -677,7 +677,9 @@ export function simulateTrains(
   }
   if (zoom >= 10) {
     for (const line of visible) {
+      if (trains.length >= cap) break;
       for (const t of trainsOnVisibleSpan(line, minutes, weekday, bounds, pad, zoom, trains)) {
+        if (trains.length >= cap) break;
         if (seen.has(t.id)) continue;
         seen.add(t.id);
         trains.push(t);

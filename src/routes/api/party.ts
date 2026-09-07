@@ -146,6 +146,72 @@ function flushFile() {
   }
 }
 
+let fileSoon: ReturnType<typeof setTimeout> | null = null;
+const sqlSoon = new Map<string, Room>();
+let sqlTimer: ReturnType<typeof setTimeout> | null = null;
+
+function flushFileSoon() {
+  if (fileSoon) return;
+  fileSoon = setTimeout(() => {
+    fileSoon = null;
+    flushFile();
+  }, 320);
+}
+
+async function writeSql(key: string, room: Room) {
+  const sql = await ensureTable();
+  await sql.query(
+    `insert into party_rooms (key, name, pass, members, messages, msg_id, updated_at)
+     values ($1, $2, $3, $4, $5, $6, now())
+     on conflict (key) do update set
+       name = excluded.name,
+       pass = excluded.pass,
+       members = excluded.members,
+       messages = excluded.messages,
+       msg_id = excluded.msg_id,
+       updated_at = now()`,
+    [key, room.name, room.pass, JSON.stringify(room.members), JSON.stringify(room.messages), room.msgId],
+  );
+}
+
+function saveSqlSoon(key: string, room: Room) {
+  sqlSoon.set(key, room);
+  if (sqlTimer) return;
+  sqlTimer = setTimeout(() => {
+    sqlTimer = null;
+    const batch = [...sqlSoon.entries()];
+    sqlSoon.clear();
+    void (async () => {
+      for (const [k, r] of batch) {
+        try {
+          await writeSql(k, r);
+        } catch {
+          /* */
+        }
+      }
+    })();
+  }, 900);
+}
+
+async function saveRoom(key: string, room: Room, urgent = true) {
+  rooms.set(key, room);
+  if (urgent) {
+    if (fileSoon) {
+      clearTimeout(fileSoon);
+      fileSoon = null;
+    }
+    flushFile();
+    try {
+      await writeSql(key, room);
+    } catch {
+      /* */
+    }
+    return;
+  }
+  flushFileSoon();
+  saveSqlSoon(key, room);
+}
+
 async function ensureTable() {
   const sql = await getSql();
   await sql.query(`create table if not exists party_rooms (
@@ -192,28 +258,6 @@ async function hydrateSql() {
       work,
       new Promise((_, rej) => setTimeout(() => rej(new Error("sql")), 1200)),
     ]);
-  } catch {
-    /* */
-  }
-}
-
-async function saveRoom(key: string, room: Room) {
-  rooms.set(key, room);
-  flushFile();
-  try {
-    const sql = await ensureTable();
-    await sql.query(
-      `insert into party_rooms (key, name, pass, members, messages, msg_id, updated_at)
-       values ($1, $2, $3, $4, $5, $6, now())
-       on conflict (key) do update set
-         name = excluded.name,
-         pass = excluded.pass,
-         members = excluded.members,
-         messages = excluded.messages,
-         msg_id = excluded.msg_id,
-         updated_at = now()`,
-      [key, room.name, room.pass, JSON.stringify(room.members), JSON.stringify(room.messages), room.msgId],
-    );
   } catch {
     /* */
   }
@@ -550,7 +594,7 @@ export const Route = createFileRoute("/api/party")({
         dropOldSelf(room, me, uid, token, was);
 
         if (action === "beat") {
-          await saveRoom(found.key, room);
+          await saveRoom(found.key, room, false);
           return json({ ok: true, ...publicOf(room, me.id, was), you: me.nick, youId: me.id, host: me.id === room.hostId });
         }
         if (action === "send") {

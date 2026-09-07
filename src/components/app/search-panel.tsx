@@ -914,6 +914,23 @@ function copyStation(hit: StationHit): StationHit {
   };
 }
 
+function hitFromEl(el: HTMLElement, rows: StationHit[]): StationHit | null {
+  const lng = Number(el.dataset.lng);
+  const lat = Number(el.dataset.lat);
+  const name = el.dataset.name ?? "";
+  const pf = el.dataset.pf ?? "";
+  if (!Number.isFinite(lng) || !Number.isFinite(lat)) return null;
+  return (
+    rows.find((h) => h.name === name && Math.abs(h.lng - lng) < 0.0005 && Math.abs(h.lat - lat) < 0.0005) ?? {
+      name,
+      lng,
+      lat,
+      prefecture: pf,
+      lines: [],
+    }
+  );
+}
+
 export function fillPickedStation(hit: StationHit, field?: "from" | "to") {
   const s = useMapStore.getState();
   const which = field ?? s.pickField;
@@ -974,6 +991,17 @@ function stationTextMatch(st: StationHit, text: string) {
   return false;
 }
 
+function resolvePicked(
+  index: Map<string, StationHit>,
+  text: string,
+  known: StationHit | null,
+  selected: StationHit | null,
+) {
+  if (known && stationTextMatch(known, text) && Number.isFinite(known.lng)) return known;
+  if (selected && stationTextMatch(selected, text) && Number.isFinite(selected.lng)) return selected;
+  return resolveStation(index, text, known ?? selected);
+}
+
 export function SearchPanel() {
   const lang = useMapStore((s) => s.lang);
   const t = copies[lang];
@@ -1012,7 +1040,7 @@ export function SearchPanel() {
     fillPickedStation(chosen, field);
     if (field === "from") setFromText(displayName(chosen.name, lang));
     else setToText(displayName(chosen.name, lang));
-    window.setTimeout(() => setFocus(null), 0);
+    setFocus(null);
   };
 
   const clearFrom = () => {
@@ -1032,12 +1060,8 @@ export function SearchPanel() {
   };
 
   const runSearch = () => {
-    const dest =
-      destStation && stationTextMatch(destStation, toText) ? destStation : resolveStation(index, toText, destStation);
-    const originPick =
-      originStation && stationTextMatch(originStation, fromText)
-        ? originStation
-        : resolveStation(index, fromText, originStation);
+    const dest = resolvePicked(index, toText, destStation, useMapStore.getState().selectedStation);
+    const originPick = resolvePicked(index, fromText, originStation, null);
     const origin = originPick ?? currentOrigin();
     if (!origin || !dest) return;
     if (dest.name) setToText(displayName(dest.name, lang));
@@ -1062,7 +1086,7 @@ export function SearchPanel() {
   const lockOn = (which: "from" | "to") => {
     const text = which === "from" ? fromText : toText;
     const known = which === "from" ? originStation : destStation;
-    const st = known ?? resolveStation(index, text, null);
+    const st = resolvePicked(index, text, known, useMapStore.getState().selectedStation);
     if (!st) return;
     if (which === "from") {
       setFromText(displayName(st.name, lang));
@@ -1197,11 +1221,16 @@ export function SearchPanel() {
                 key={`${hit.name}|${hit.prefecture}|${hit.lng.toFixed(5)}|${hit.lat.toFixed(5)}|${i}`}
                 type="button"
                 data-i={String(i)}
+                data-name={hit.name}
+                data-pf={hit.prefecture}
+                data-lng={String(hit.lng)}
+                data-lat={String(hit.lat)}
                 className="relative z-10 flex min-h-12 w-full shrink-0 items-center justify-between gap-2 rounded-[var(--radius-sm)] px-2 py-3 text-left hover:bg-fg/6"
-                onPointerDown={(e) => {
+                onPointerDown={(e) => e.stopPropagation()}
+                onPointerUp={(e) => {
+                  e.preventDefault();
                   e.stopPropagation();
-                  const idx = Number((e.currentTarget as HTMLElement).dataset.i);
-                  const st = hitsRef.current[idx];
+                  const st = hitFromEl(e.currentTarget as HTMLElement, hitsRef.current);
                   if (st) pick(st);
                 }}
                 onClick={(e) => {

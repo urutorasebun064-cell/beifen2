@@ -1,0 +1,418 @@
+[
+  {
+    "name": "BUILD.bazel",
+    "path": "data/dictionary/BUILD.bazel",
+    "sha": "91fe1ebccbdc8060f4bcf06346d4d0495d8f37bf",
+    "size": 7471,
+    "url": "https://api.github.com/repos/BYVoid/OpenCC/contents/data/dictionary/BUILD.bazel?ref=master",
+    "html_url": "https://github.com/BYVoid/OpenCC/blob/master/data/dictionary/BUILD.bazel",
+    "git_url": "https://api.github.com/repos/BYVoid/OpenCC/git/blobs/91fe1ebccbdc8060f4bcf06346d4d0495d8f37bf",
+    "download_url": "https://raw.githubusercontent.com/BYVoid/OpenCC/master/data/dictionary/BUILD.bazel",
+    "type": "file",
+    "_links": {
+      "self": "https://api.github.com/repos/BYVoid/OpenCC/contents/data/dictionary/BUILD.bazel?ref=master",
+      "git": "https://api.github.com/repos/BYVoid/OpenCC/git/blobs/91fe1ebccbdc8060f4bcf06346d4d0495d8f37bf",
+      "html": "https://github.com/BYVoid/OpenCC/blob/master/data/dictionary/BUILD.bazel"
+    }
+  },
+  {
+    "name": "CJK_Compatibility_Ideographs.txt",
+    "path": "data/dictionary/CJK_Compatibility_Ideographs.txt",
+    "sha": "91304af8def6d96b0d00dd482c8a934dedcebfa6",
+    "size": 39074,
+    "url": "https://api.github.com/repos/BYVoid/OpenCC/contents/data/dictionary/CJK_Compatibility_Ideographs.txt?ref=master",
+    "html_url": "https://github.com/BYVoid/OpenCC/blob/master/data/dictionary/CJK_Compatibility_Ideographs.txt",
+    "git_url": "https://api.github.com/repos/BYVoid/OpenCC/git/blobs/91304af8def6d96b0d00dd482c8a934dedcebfa6",
+    "download_url": "https://raw.githubusercontent.com/BYVoid/OpenCC/master/data/dictionary/CJK_Compatibility_Ideographs.txt",
+    "type": "file",
+    "_links": {
+      "self": "https://api.github.com/repos/BYVoid/OpenCC/contents/data/dictionary/CJK_Compatibility_Ideographs.txt?ref=master",
+      "git": "https://api.github.com/repos/BYVoid/OpenCC/git/blobs/91304af8def6d96b0d00dd482c8a934dedcebfa6",
+      "html": "https://github.com/BYVoid/OpenCC/blob/master/data/dictionary/CJK_Compatibility_Ideographs.txt"
+    }
+  },
+  {
+    "name": "DictionaryCompatibilityIdeographsTest.cpp",
+    "path": "data/dictionary/DictionaryCompatibilityIdeographsTest.cpp",
+    "sha": "d36a25b13a8f77a982d6ca9183bd045776cea5c6",
+    "size": 5337,
+    "url": "https://api.github.com/repos/BYVoid/OpenCC/contents/data/dictionary/DictionaryCompatibilityIdeographsTest.cpp?ref=master",
+    "html_url": "https://github.com/BYVoid/OpenCC/blob/master/data/dictionary/DictionaryCompatibilityIdeographsTest.cpp",
+    "git_url": "https://api.github.com/repos/BYVoid/OpenCC/git/blobs/d36a25b13a8f77a982d6ca9183bd045776cea5c6",
+    "download_url": "https://raw.githubusercontent.com/BYVoid/OpenCC/master/data/dictionary/DictionaryCompatibilityIdeographsTest.cpp",
+    "type": "file",
+    "_links": {
+      "self": "https://api.github.com/repos/BYVoid/OpenCC/contents/data/dictionary/DictionaryCompatibilityIdeographsTest.cpp?ref=master",
+      "git": "https://api.github.com/repos/BYVoid/OpenCC/git/blobs/d36a25b13a8f77a982d6ca9183bd045776cea5c6",
+      "html": "https://github.com/BYVoid/OpenCC/blob/master/data/dictionary/DictionaryCompatibilityIdeographsTest.cpp"
+    }
+  },
+  {
+    "name": "DictionaryNonBmpTest.cpp",
+    "path": "data/dictionary/DictionaryNonBmpTest.cpp",
+    "sha": "cfcea5db43fa72fd8caef879937dc339b74ca015",
+    "size": 3610,
+    "url": "https://api.github.com/repos/BYVoid/OpenCC/contents/data/dictionary/DictionaryNonBmpTest.cpp?ref=master",
+    "html_url": "https://github.com/BYVoid/OpenCC/blob/master/data/dictionary/DictionaryNonBmpTest.cpp",
+    "git_url": "https://api.github.com/repos/BYVoid/OpenCC/git/blobs/cfcea5db43fa72fd8caef879937dc339b74ca015",
+    "download_url": "https://raw.githubusercontent.com/BYVoid/OpenCC/master/data/dictionary/DictionaryNonBmpTest.cpp",
+    "type": "file",
+    "_links": {
+      "self": "https://api.github.com/repos/BYVoid/OpenCC/contents/data/dictionary/DictionaryNonBmpTest.cpp?ref=master",
+      "git": "https://api.github.com/repos/BYVoid/OpenCC/git/blobs/cfcea5db43fa72fd8caef879937dc339b74ca015",
+      "html": "https://github.com/BYVoid/OpenCC/blob/master/data/dictionary/DictionaryNonBmpTest.cpp"
+    }
+  },
+  {
+    "name": "DictionaryPhraseCharacterDependencyTest.cpp",
+    "path": "data/dictionary/DictionaryPhraseCharacterDependencyTest.cpp",
+    "sha": "fabd90e6b4568b1b95d855259b885ed2d904ed1d",
+    "size": 5710,
+    "url": "https://api.github.com/repos/BYVoid/OpenCC/contents/data/dictionary/DictionaryPhraseCharacterDependencyTest.cpp?ref=master",
+    "html_url": "https://github.com/BYVoid/OpenCC/blob/master/data/dictionary/DictionaryPhraseCharacterDependencyTest.cpp",
+    "git_url": "https://api.github.com/repos/BYVoid/OpenCC/git/blobs/fabd90e6b4568b1b95d855259b885ed2d904ed1d",
+    "download_url": "https://raw.githubusercontent.com/BYVoid/OpenCC/master/data/dictionary/DictionaryPhraseCharacterDependencyTest.cpp",
+    "type": "file",
+    "_links": {
+      "self": "https://api.github.com/repos/BYVoid/OpenCC/contents/data/dictionary/DictionaryPhraseCharacterDependencyTest.cpp?ref=master",
+      "git": "https://api.github.com/repos/BYVoid/OpenCC/git/blobs/fabd90e6b4568b1b95d855259b885ed2d904ed1d",
+      "html": "https://github.com/BYVoid/OpenCC/blob/master/data/dictionary/DictionaryPhraseCharacterDependencyTest.cpp"
+    }
+  },
+  {
+    "name": "DictionaryPhraseSegmentationTest.cpp",
+    "path": "data/dictionary/DictionaryPhraseSegmentationTest.cpp",
+    "sha": "a1a1a0a8761f7e6e47af85f14ce51f4d9c0dbd70",
+    "size": 8260,
+    "url": "https://api.github.com/repos/BYVoid/OpenCC/contents/data/dictionary/DictionaryPhraseSegmentationTest.cpp?ref=master",
+    "html_url": "https://github.com/BYVoid/OpenCC/blob/master/data/dictionary/DictionaryPhraseSegmentationTest.cpp",
+    "git_url": "https://api.github.com/repos/BYVoid/OpenCC/git/blobs/a1a1a0a8761f7e6e47af85f14ce51f4d9c0dbd70",
+    "download_url": "https://raw.githubusercontent.com/BYVoid/OpenCC/master/data/dictionary/DictionaryPhraseSegmentationTest.cpp",
+    "type": "file",
+    "_links": {
+      "self": "https://api.github.com/repos/BYVoid/OpenCC/contents/data/dictionary/DictionaryPhraseSegmentationTest.cpp?ref=master",
+      "git": "https://api.github.com/repos/BYVoid/OpenCC/git/blobs/a1a1a0a8761f7e6e47af85f14ce51f4d9c0dbd70",
+      "html": "https://github.com/BYVoid/OpenCC/blob/master/data/dictionary/DictionaryPhraseSegmentationTest.cpp"
+    }
+  },
+  {
+    "name": "DictionaryReverseMappingTest.cpp",
+    "path": "data/dictionary/DictionaryReverseMappingTest.cpp",
+    "sha": "4b612a8c694e4329f9d4ecd99389330fecb858ba",
+    "size": 3165,
+    "url": "https://api.github.com/repos/BYVoid/OpenCC/contents/data/dictionary/DictionaryReverseMappingTest.cpp?ref=master",
+    "html_url": "https://github.com/BYVoid/OpenCC/blob/master/data/dictionary/DictionaryReverseMappingTest.cpp",
+    "git_url": "https://api.github.com/repos/BYVoid/OpenCC/git/blobs/4b612a8c694e4329f9d4ecd99389330fecb858ba",
+    "download_url": "https://raw.githubusercontent.com/BYVoid/OpenCC/master/data/dictionary/DictionaryReverseMappingTest.cpp",
+    "type": "file",
+    "_links": {
+      "self": "https://api.github.com/repos/BYVoid/OpenCC/contents/data/dictionary/DictionaryReverseMappingTest.cpp?ref=master",
+      "git": "https://api.github.com/repos/BYVoid/OpenCC/git/blobs/4b612a8c694e4329f9d4ecd99389330fecb858ba",
+      "html": "https://github.com/BYVoid/OpenCC/blob/master/data/dictionary/DictionaryReverseMappingTest.cpp"
+    }
+  },
+  {
+    "name": "DictionaryTest.cpp",
+    "path": "data/dictionary/DictionaryTest.cpp",
+    "sha": "b489b21e59e415a45479be2b1a038fe2597011d1",
+    "size": 2941,
+    "url": "https://api.github.com/repos/BYVoid/OpenCC/contents/data/dictionary/DictionaryTest.cpp?ref=master",
+    "html_url": "https://github.com/BYVoid/OpenCC/blob/master/data/dictionary/DictionaryTest.cpp",
+    "git_url": "https://api.github.com/repos/BYVoid/OpenCC/git/blobs/b489b21e59e415a45479be2b1a038fe2597011d1",
+    "download_url": "https://raw.githubusercontent.com/BYVoid/OpenCC/master/data/dictionary/DictionaryTest.cpp",
+    "type": "file",
+    "_links": {
+      "self": "https://api.github.com/repos/BYVoid/OpenCC/contents/data/dictionary/DictionaryTest.cpp?ref=master",
+      "git": "https://api.github.com/repos/BYVoid/OpenCC/git/blobs/b489b21e59e415a45479be2b1a038fe2597011d1",
+      "html": "https://github.com/BYVoid/OpenCC/blob/master/data/dictionary/DictionaryTest.cpp"
+    }
+  },
+  {
+    "name": "DictionaryVariantRevPhrasesTest.cpp",
+    "path": "data/dictionary/DictionaryVariantRevPhrasesTest.cpp",
+    "sha": "fe56e42eaafee367fdc9cc588dfb33fddc401a8b",
+    "size": 7883,
+    "url": "https://api.github.com/repos/BYVoid/OpenCC/contents/data/dictionary/DictionaryVariantRevPhrasesTest.cpp?ref=master",
+    "html_url": "https://github.com/BYVoid/OpenCC/blob/master/data/dictionary/DictionaryVariantRevPhrasesTest.cpp",
+    "git_url": "https://api.github.com/repos/BYVoid/OpenCC/git/blobs/fe56e42eaafee367fdc9cc588dfb33fddc401a8b",
+    "download_url": "https://raw.githubusercontent.com/BYVoid/OpenCC/master/data/dictionary/DictionaryVariantRevPhrasesTest.cpp",
+    "type": "file",
+    "_links": {
+      "self": "https://api.github.com/repos/BYVoid/OpenCC/contents/data/dictionary/DictionaryVariantRevPhrasesTest.cpp?ref=master",
+      "git": "https://api.github.com/repos/BYVoid/OpenCC/git/blobs/fe56e42eaafee367fdc9cc588dfb33fddc401a8b",
+      "html": "https://github.com/BYVoid/OpenCC/blob/master/data/dictionary/DictionaryVariantRevPhrasesTest.cpp"
+    }
+  },
+  {
+    "name": "HKPhrases.txt",
+    "path": "data/dictionary/HKPhrases.txt",
+    "sha": "b58261c358105ae8a1179c61355e136641ae1e88",
+    "size": 2902,
+    "url": "https://api.github.com/repos/BYVoid/OpenCC/contents/data/dictionary/HKPhrases.txt?ref=master",
+    "html_url": "https://github.com/BYVoid/OpenCC/blob/master/data/dictionary/HKPhrases.txt",
+    "git_url": "https://api.github.com/repos/BYVoid/OpenCC/git/blobs/b58261c358105ae8a1179c61355e136641ae1e88",
+    "download_url": "https://raw.githubusercontent.com/BYVoid/OpenCC/master/data/dictionary/HKPhrases.txt",
+    "type": "file",
+    "_links": {
+      "self": "https://api.github.com/repos/BYVoid/OpenCC/contents/data/dictionary/HKPhrases.txt?ref=master",
+      "git": "https://api.github.com/repos/BYVoid/OpenCC/git/blobs/b58261c358105ae8a1179c61355e136641ae1e88",
+      "html": "https://github.com/BYVoid/OpenCC/blob/master/data/dictionary/HKPhrases.txt"
+    }
+  },
+  {
+    "name": "HKPhrasesRev.txt",
+    "path": "data/dictionary/HKPhrasesRev.txt",
+    "sha": "ffa254af81a71e736d5e1f3ce65b6d6ded854f54",
+    "size": 2857,
+    "url": "https://api.github.com/repos/BYVoid/OpenCC/contents/data/dictionary/HKPhrasesRev.txt?ref=master",
+    "html_url": "https://github.com/BYVoid/OpenCC/blob/master/data/dictionary/HKPhrasesRev.txt",
+    "git_url": "https://api.github.com/repos/BYVoid/OpenCC/git/blobs/ffa254af81a71e736d5e1f3ce65b6d6ded854f54",
+    "download_url": "https://raw.githubusercontent.com/BYVoid/OpenCC/master/data/dictionary/HKPhrasesRev.txt",
+    "type": "file",
+    "_links": {
+      "self": "https://api.github.com/repos/BYVoid/OpenCC/contents/data/dictionary/HKPhrasesRev.txt?ref=master",
+      "git": "https://api.github.com/repos/BYVoid/OpenCC/git/blobs/ffa254af81a71e736d5e1f3ce65b6d6ded854f54",
+      "html": "https://github.com/BYVoid/OpenCC/blob/master/data/dictionary/HKPhrasesRev.txt"
+    }
+  },
+  {
+    "name": "HKVariants.txt",
+    "path": "data/dictionary/HKVariants.txt",
+    "sha": "05aab586a05d2e9dd725f7710557d57092826454",
+    "size": 1001,
+    "url": "https://api.github.com/repos/BYVoid/OpenCC/contents/data/dictionary/HKVariants.txt?ref=master",
+    "html_url": "https://github.com/BYVoid/OpenCC/blob/master/data/dictionary/HKVariants.txt",
+    "git_url": "https://api.github.com/repos/BYVoid/OpenCC/git/blobs/05aab586a05d2e9dd725f7710557d57092826454",
+    "download_url": "https://raw.githubusercontent.com/BYVoid/OpenCC/master/data/dictionary/HKVariants.txt",
+    "type": "file",
+    "_links": {
+      "self": "https://api.github.com/repos/BYVoid/OpenCC/contents/data/dictionary/HKVariants.txt?ref=master",
+      "git": "https://api.github.com/repos/BYVoid/OpenCC/git/blobs/05aab586a05d2e9dd725f7710557d57092826454",
+      "html": "https://github.com/BYVoid/OpenCC/blob/master/data/dictionary/HKVariants.txt"
+    }
+  },
+  {
+    "name": "HKVariantsPhrases.txt",
+    "path": "data/dictionary/HKVariantsPhrases.txt",
+    "sha": "15865bbf6059b6bad204e12aabdd61811269261a",
+    "size": 7028,
+    "url": "https://api.github.com/repos/BYVoid/OpenCC/contents/data/dictionary/HKVariantsPhrases.txt?ref=master",
+    "html_url": "https://github.com/BYVoid/OpenCC/blob/master/data/dictionary/HKVariantsPhrases.txt",
+    "git_url": "https://api.github.com/repos/BYVoid/OpenCC/git/blobs/15865bbf6059b6bad204e12aabdd61811269261a",
+    "download_url": "https://raw.githubusercontent.com/BYVoid/OpenCC/master/data/dictionary/HKVariantsPhrases.txt",
+    "type": "file",
+    "_links": {
+      "self": "https://api.github.com/repos/BYVoid/OpenCC/contents/data/dictionary/HKVariantsPhrases.txt?ref=master",
+      "git": "https://api.github.com/repos/BYVoid/OpenCC/git/blobs/15865bbf6059b6bad204e12aabdd61811269261a",
+      "html": "https://github.com/BYVoid/OpenCC/blob/master/data/dictionary/HKVariantsPhrases.txt"
+    }
+  },
+  {
+    "name": "HKVariantsRevPhrases.txt",
+    "path": "data/dictionary/HKVariantsRevPhrases.txt",
+    "sha": "97c8ba274e269151dd7ba7767799a707d6c3c5bd",
+    "size": 6768,
+    "url": "https://api.github.com/repos/BYVoid/OpenCC/contents/data/dictionary/HKVariantsRevPhrases.txt?ref=master",
+    "html_url": "https://github.com/BYVoid/OpenCC/blob/master/data/dictionary/HKVariantsRevPhrases.txt",
+    "git_url": "https://api.github.com/repos/BYVoid/OpenCC/git/blobs/97c8ba274e269151dd7ba7767799a707d6c3c5bd",
+    "download_url": "https://raw.githubusercontent.com/BYVoid/OpenCC/master/data/dictionary/HKVariantsRevPhrases.txt",
+    "type": "file",
+    "_links": {
+      "self": "https://api.github.com/repos/BYVoid/OpenCC/contents/data/dictionary/HKVariantsRevPhrases.txt?ref=master",
+      "git": "https://api.github.com/repos/BYVoid/OpenCC/git/blobs/97c8ba274e269151dd7ba7767799a707d6c3c5bd",
+      "html": "https://github.com/BYVoid/OpenCC/blob/master/data/dictionary/HKVariantsRevPhrases.txt"
+    }
+  },
+  {
+    "name": "JPShinjitaiCharacters.txt",
+    "path": "data/dictionary/JPShinjitaiCharacters.txt",
+    "sha": "eda496cea887502f420c1e92ef39fc05006ce17f",
+    "size": 12442,
+    "url": "https://api.github.com/repos/BYVoid/OpenCC/contents/data/dictionary/JPShinjitaiCharacters.txt?ref=master",
+    "html_url": "https://github.com/BYVoid/OpenCC/blob/master/data/dictionary/JPShinjitaiCharacters.txt",
+    "git_url": "https://api.github.com/repos/BYVoid/OpenCC/git/blobs/eda496cea887502f420c1e92ef39fc05006ce17f",
+    "download_url": "https://raw.githubusercontent.com/BYVoid/OpenCC/master/data/dictionary/JPShinjitaiCharacters.txt",
+    "type": "file",
+    "_links": {
+      "self": "https://api.github.com/repos/BYVoid/OpenCC/contents/data/dictionary/JPShinjitaiCharacters.txt?ref=master",
+      "git": "https://api.github.com/repos/BYVoid/OpenCC/git/blobs/eda496cea887502f420c1e92ef39fc05006ce17f",
+      "html": "https://github.com/BYVoid/OpenCC/blob/master/data/dictionary/JPShinjitaiCharacters.txt"
+    }
+  },
+  {
+    "name": "JPShinjitaiPhrases.txt",
+    "path": "data/dictionary/JPShinjitaiPhrases.txt",
+    "sha": "1ad8780e5e2d89c3ff1a79d91a0425b7452d6498",
+    "size": 3809,
+    "url": "https://api.github.com/repos/BYVoid/OpenCC/contents/data/dictionary/JPShinjitaiPhrases.txt?ref=master",
+    "html_url": "https://github.com/BYVoid/OpenCC/blob/master/data/dictionary/JPShinjitaiPhrases.txt",
+    "git_url": "https://api.github.com/repos/BYVoid/OpenCC/git/blobs/1ad8780e5e2d89c3ff1a79d91a0425b7452d6498",
+    "download_url": "https://raw.githubusercontent.com/BYVoid/OpenCC/master/data/dictionary/JPShinjitaiPhrases.txt",
+    "type": "file",
+    "_links": {
+      "self": "https://api.github.com/repos/BYVoid/OpenCC/contents/data/dictionary/JPShinjitaiPhrases.txt?ref=master",
+      "git": "https://api.github.com/repos/BYVoid/OpenCC/git/blobs/1ad8780e5e2d89c3ff1a79d91a0425b7452d6498",
+      "html": "https://github.com/BYVoid/OpenCC/blob/master/data/dictionary/JPShinjitaiPhrases.txt"
+    }
+  },
+  {
+    "name": "STCharacters.txt",
+    "path": "data/dictionary/STCharacters.txt",
+    "sha": "677e8fbc70dcdc1da477b9f6c9f42a6b33609ae0",
+    "size": 36026,
+    "url": "https://api.github.com/repos/BYVoid/OpenCC/contents/data/dictionary/STCharacters.txt?ref=master",
+    "html_url": "https://github.com/BYVoid/OpenCC/blob/master/data/dictionary/STCharacters.txt",
+    "git_url": "https://api.github.com/repos/BYVoid/OpenCC/git/blobs/677e8fbc70dcdc1da477b9f6c9f42a6b33609ae0",
+    "download_url": "https://raw.githubusercontent.com/BYVoid/OpenCC/master/data/dictionary/STCharacters.txt",
+    "type": "file",
+    "_links": {
+      "self": "https://api.github.com/repos/BYVoid/OpenCC/contents/data/dictionary/STCharacters.txt?ref=master",
+      "git": "https://api.github.com/repos/BYVoid/OpenCC/git/blobs/677e8fbc70dcdc1da477b9f6c9f42a6b33609ae0",
+      "html": "https://github.com/BYVoid/OpenCC/blob/master/data/dictionary/STCharacters.txt"
+    }
+  },
+  {
+    "name": "STPhrases.txt",
+    "path": "data/dictionary/STPhrases.txt",
+    "sha": "eb0e131eaffdd4a2e9c2e4673b4f48854b688819",
+    "size": 1007834,
+    "url": "https://api.github.com/repos/BYVoid/OpenCC/contents/data/dictionary/STPhrases.txt?ref=master",
+    "html_url": "https://github.com/BYVoid/OpenCC/blob/master/data/dictionary/STPhrases.txt",
+    "git_url": "https://api.github.com/repos/BYVoid/OpenCC/git/blobs/eb0e131eaffdd4a2e9c2e4673b4f48854b688819",
+    "download_url": "https://raw.githubusercontent.com/BYVoid/OpenCC/master/data/dictionary/STPhrases.txt",
+    "type": "file",
+    "_links": {
+      "self": "https://api.github.com/repos/BYVoid/OpenCC/contents/data/dictionary/STPhrases.txt?ref=master",
+      "git": "https://api.github.com/repos/BYVoid/OpenCC/git/blobs/eb0e131eaffdd4a2e9c2e4673b4f48854b688819",
+      "html": "https://github.com/BYVoid/OpenCC/blob/master/data/dictionary/STPhrases.txt"
+    }
+  },
+  {
+    "name": "TSCharacters.txt",
+    "path": "data/dictionary/TSCharacters.txt",
+    "sha": "fbe8912067fda73c3d3a491d5cc8bc3698125291",
+    "size": 104516,
+    "url": "https://api.github.com/repos/BYVoid/OpenCC/contents/data/dictionary/TSCharacters.txt?ref=master",
+    "html_url": "https://github.com/BYVoid/OpenCC/blob/master/data/dictionary/TSCharacters.txt",
+    "git_url": "https://api.github.com/repos/BYVoid/OpenCC/git/blobs/fbe8912067fda73c3d3a491d5cc8bc3698125291",
+    "download_url": "https://raw.githubusercontent.com/BYVoid/OpenCC/master/data/dictionary/TSCharacters.txt",
+    "type": "file",
+    "_links": {
+      "self": "https://api.github.com/repos/BYVoid/OpenCC/contents/data/dictionary/TSCharacters.txt?ref=master",
+      "git": "https://api.github.com/repos/BYVoid/OpenCC/git/blobs/fbe8912067fda73c3d3a491d5cc8bc3698125291",
+      "html": "https://github.com/BYVoid/OpenCC/blob/master/data/dictionary/TSCharacters.txt"
+    }
+  },
+  {
+    "name": "TSPhrases.txt",
+    "path": "data/dictionary/TSPhrases.txt",
+    "sha": "fad5e9bac0516e30be994cb14ab1128f9abb8ea0",
+    "size": 8786,
+    "url": "https://api.github.com/repos/BYVoid/OpenCC/contents/data/dictionary/TSPhrases.txt?ref=master",
+    "html_url": "https://github.com/BYVoid/OpenCC/blob/master/data/dictionary/TSPhrases.txt",
+    "git_url": "https://api.github.com/repos/BYVoid/OpenCC/git/blobs/fad5e9bac0516e30be994cb14ab1128f9abb8ea0",
+    "download_url": "https://raw.githubusercontent.com/BYVoid/OpenCC/master/data/dictionary/TSPhrases.txt",
+    "type": "file",
+    "_links": {
+      "self": "https://api.github.com/repos/BYVoid/OpenCC/contents/data/dictionary/TSPhrases.txt?ref=master",
+      "git": "https://api.github.com/repos/BYVoid/OpenCC/git/blobs/fad5e9bac0516e30be994cb14ab1128f9abb8ea0",
+      "html": "https://github.com/BYVoid/OpenCC/blob/master/data/dictionary/TSPhrases.txt"
+    }
+  },
+  {
+    "name": "TWPhrases.txt",
+    "path": "data/dictionary/TWPhrases.txt",
+    "sha": "cb6da9186c442a7335036d3020a46f22f6aa4bee",
+    "size": 19429,
+    "url": "https://api.github.com/repos/BYVoid/OpenCC/contents/data/dictionary/TWPhrases.txt?ref=master",
+    "html_url": "https://github.com/BYVoid/OpenCC/blob/master/data/dictionary/TWPhrases.txt",
+    "git_url": "https://api.github.com/repos/BYVoid/OpenCC/git/blobs/cb6da9186c442a7335036d3020a46f22f6aa4bee",
+    "download_url": "https://raw.githubusercontent.com/BYVoid/OpenCC/master/data/dictionary/TWPhrases.txt",
+    "type": "file",
+    "_links": {
+      "self": "https://api.github.com/repos/BYVoid/OpenCC/contents/data/dictionary/TWPhrases.txt?ref=master",
+      "git": "https://api.github.com/repos/BYVoid/OpenCC/git/blobs/cb6da9186c442a7335036d3020a46f22f6aa4bee",
+      "html": "https://github.com/BYVoid/OpenCC/blob/master/data/dictionary/TWPhrases.txt"
+    }
+  },
+  {
+    "name": "TWPhrasesRev.txt",
+    "path": "data/dictionary/TWPhrasesRev.txt",
+    "sha": "39071f5873fa2f089265ef9922c509ae09cea940",
+    "size": 19235,
+    "url": "https://api.github.com/repos/BYVoid/OpenCC/contents/data/dictionary/TWPhrasesRev.txt?ref=master",
+    "html_url": "https://github.com/BYVoid/OpenCC/blob/master/data/dictionary/TWPhrasesRev.txt",
+    "git_url": "https://api.github.com/repos/BYVoid/OpenCC/git/blobs/39071f5873fa2f089265ef9922c509ae09cea940",
+    "download_url": "https://raw.githubusercontent.com/BYVoid/OpenCC/master/data/dictionary/TWPhrasesRev.txt",
+    "type": "file",
+    "_links": {
+      "self": "https://api.github.com/repos/BYVoid/OpenCC/contents/data/dictionary/TWPhrasesRev.txt?ref=master",
+      "git": "https://api.github.com/repos/BYVoid/OpenCC/git/blobs/39071f5873fa2f089265ef9922c509ae09cea940",
+      "html": "https://github.com/BYVoid/OpenCC/blob/master/data/dictionary/TWPhrasesRev.txt"
+    }
+  },
+  {
+    "name": "TWVariants.txt",
+    "path": "data/dictionary/TWVariants.txt",
+    "sha": "9cc72255cf64b8b83e0f9916accb4436756d3a18",
+    "size": 986,
+    "url": "https://api.github.com/repos/BYVoid/OpenCC/contents/data/dictionary/TWVariants.txt?ref=master",
+    "html_url": "https://github.com/BYVoid/OpenCC/blob/master/data/dictionary/TWVariants.txt",
+    "git_url": "https://api.github.com/repos/BYVoid/OpenCC/git/blobs/9cc72255cf64b8b83e0f9916accb4436756d3a18",
+    "download_url": "https://raw.githubusercontent.com/BYVoid/OpenCC/master/data/dictionary/TWVariants.txt",
+    "type": "file",
+    "_links": {
+      "self": "https://api.github.com/repos/BYVoid/OpenCC/contents/data/dictionary/TWVariants.txt?ref=master",
+      "git": "https://api.github.com/repos/BYVoid/OpenCC/git/blobs/9cc72255cf64b8b83e0f9916accb4436756d3a18",
+      "html": "https://github.com/BYVoid/OpenCC/blob/master/data/dictionary/TWVariants.txt"
+    }
+  },
+  {
+    "name": "TWVariantsPhrases.txt",
+    "path": "data/dictionary/TWVariantsPhrases.txt",
+    "sha": "ce196cd48662fbb1f6a11359331de23833b50d3a",
+    "size": 1107,
+    "url": "https://api.github.com/repos/BYVoid/OpenCC/contents/data/dictionary/TWVariantsPhrases.txt?ref=master",
+    "html_url": "https://github.com/BYVoid/OpenCC/blob/master/data/dictionary/TWVariantsPhrases.txt",
+    "git_url": "https://api.github.com/repos/BYVoid/OpenCC/git/blobs/ce196cd48662fbb1f6a11359331de23833b50d3a",
+    "download_url": "https://raw.githubusercontent.com/BYVoid/OpenCC/master/data/dictionary/TWVariantsPhrases.txt",
+    "type": "file",
+    "_links": {
+      "self": "https://api.github.com/repos/BYVoid/OpenCC/contents/data/dictionary/TWVariantsPhrases.txt?ref=master",
+      "git": "https://api.github.com/repos/BYVoid/OpenCC/git/blobs/ce196cd48662fbb1f6a11359331de23833b50d3a",
+      "html": "https://github.com/BYVoid/OpenCC/blob/master/data/dictionary/TWVariantsPhrases.txt"
+    }
+  },
+  {
+    "name": "TWVariantsRevPhrases.txt",
+    "path": "data/dictionary/TWVariantsRevPhrases.txt",
+    "sha": "dea2171eeb0a5772d43f67f06c98ec460d8ff9a4",
+    "size": 24359,
+    "url": "https://api.github.com/repos/BYVoid/OpenCC/contents/data/dictionary/TWVariantsRevPhrases.txt?ref=master",
+    "html_url": "https://github.com/BYVoid/OpenCC/blob/master/data/dictionary/TWVariantsRevPhrases.txt",
+    "git_url": "https://api.github.com/repos/BYVoid/OpenCC/git/blobs/dea2171eeb0a5772d43f67f06c98ec460d8ff9a4",
+    "download_url": "https://raw.githubusercontent.com/BYVoid/OpenCC/master/data/dictionary/TWVariantsRevPhrases.txt",
+    "type": "file",
+    "_links": {
+      "self": "https://api.github.com/repos/BYVoid/OpenCC/contents/data/dictionary/TWVariantsRevPhrases.txt?ref=master",
+      "git": "https://api.github.com/repos/BYVoid/OpenCC/git/blobs/dea2171eeb0a5772d43f67f06c98ec460d8ff9a4",
+      "html": "https://github.com/BYVoid/OpenCC/blob/master/data/dictionary/TWVariantsRevPhrases.txt"
+    }
+  },
+  {
+    "name": "staging",
+    "path": "data/dictionary/staging",
+    "sha": "e3c7551297f0f7930a054235aa6553947d30db81",
+    "size": 0,
+    "url": "https://api.github.com/repos/BYVoid/OpenCC/contents/data/dictionary/staging?ref=master",
+    "html_url": "https://github.com/BYVoid/OpenCC/tree/master/data/dictionary/staging",
+    "git_url": "https://api.github.com/repos/BYVoid/OpenCC/git/trees/e3c7551297f0f7930a054235aa6553947d30db81",
+    "download_url": null,
+    "type": "dir",
+    "_links": {
+      "self": "https://api.github.com/repos/BYVoid/OpenCC/contents/data/dictionary/staging?ref=master",
+      "git": "https://api.github.com/repos/BYVoid/OpenCC/git/trees/e3c7551297f0f7930a054235aa6553947d30db81",
+      "html": "https://github.com/BYVoid/OpenCC/tree/master/data/dictionary/staging"
+    }
+  }
+]

@@ -41,6 +41,15 @@ function isWalk(name: string): boolean {
   return /徒歩|歩いて|walk/i.test(name);
 }
 
+function clockSpan(dep?: string, arr?: string): number {
+  if (!dep || !arr || !/^\d{1,2}:\d{2}$/.test(dep) || !/^\d{1,2}:\d{2}$/.test(arr)) return 0;
+  const [dh, dm] = dep.split(":").map(Number);
+  const [ah, am] = arr.split(":").map(Number);
+  let minutes = (ah ?? 0) * 60 + (am ?? 0) - ((dh ?? 0) * 60 + (dm ?? 0));
+  if (minutes < 0) minutes += 24 * 60;
+  return minutes;
+}
+
 function railColor(name: string): string {
   if (name.includes("山手")) return "#80c269";
   if (name.includes("中央")) return "#f15a22";
@@ -56,7 +65,11 @@ function railColor(name: string): string {
 }
 
 function stop(name: string, fallback: RouteStop): RouteStop {
-  return { name: name || fallback.name, lng: fallback.lng, lat: fallback.lat, prefecture: fallback.prefecture };
+  const n = (name || "")
+    .replace(/[（(][^）)]{0,40}[）)]/gu, "")
+    .replace(/駅$/u, "")
+    .trim();
+  return { name: n || fallback.name, lng: fallback.lng, lat: fallback.lat, prefecture: fallback.prefecture };
 }
 
 function numFrom(v: unknown): string | undefined {
@@ -225,10 +238,7 @@ function featureToJourney(feat: YahooFeature, origin: RouteStop, dest: RouteStop
     const to = stop(b.stationName || b.pointName || dest.name, dest);
     const dep = pickTime(a, "dep");
     const arr = pickTime(b, "arr") ?? pickTime(b, "dep");
-    const [dh, dm] = (dep ?? "0:0").split(":").map(Number);
-    const [ah, am] = (arr ?? "0:0").split(":").map(Number);
-    let minutes = (ah ?? 0) * 60 + (am ?? 0) - ((dh ?? 0) * 60 + (dm ?? 0));
-    if (minutes <= 0) minutes += 24 * 60;
+    const minutes = Math.max(1, clockSpan(dep, arr) || 1);
     const destName = a.destination ?? "";
     legs.push({
       kind: walk ? "walk" : "ride",
@@ -241,9 +251,9 @@ function featureToJourney(feat: YahooFeature, origin: RouteStop, dest: RouteStop
       fromPlatform: walk ? undefined : pickPlatform(a, "dep"),
       toPlatform: walk ? undefined : pickPlatform(b, "arr"),
       stops: [from, to],
-      minutes: Math.max(1, minutes),
-      departHhmm: walk ? undefined : dep,
-      arriveHhmm: walk ? undefined : arr,
+      minutes,
+      departHhmm: dep,
+      arriveHhmm: arr,
     });
   }
   if (!legs.length) return null;

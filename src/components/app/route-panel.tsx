@@ -10,7 +10,7 @@ import type { Journey, RouteLeg, Train } from "@/lib/rail/types";
 import { Button } from "@/components/ui/button";
 import { useMapStore, simNow } from "@/store/map-store";
 
-function findLine(leg: RouteLeg) {
+function findLine(leg: Pick<RouteLeg, "lineName" | "to"> & Partial<Pick<RouteLeg, "lineId" | "from">>) {
   const store = useMapStore.getState();
   const lines = store.lines;
   if (leg.lineId) {
@@ -25,7 +25,7 @@ function findLine(leg: RouteLeg) {
       lines.find((l) => l.name.includes(name) || name.includes(l.name.replace(/^JR/u, "")));
     if (hit) return hit;
   }
-  const origin = [...store.stationIndex.values()].find((s) => s.name === leg.from.name);
+  const origin = leg.from?.name ? [...store.stationIndex.values()].find((s) => s.name === leg.from!.name) : undefined;
   if (origin?.lines.length) {
     const viaDest = origin.lines.find((l) => l.stops.some((s) => s.n === leg.to.name));
     if (viaDest) return viaDest;
@@ -138,8 +138,8 @@ function withTimes(journey: Journey): RouteLeg[] {
   return ensureConnections(journey, index, simNow()).legs;
 }
 
-export function rideHeadline(leg: Pick<RouteLeg, "lineName" | "toward" | "to">, t: Copy, lang: Lang) {
-  const line = prettyLine(leg.lineName || t.line, lang);
+export function rideHeadline(leg: Pick<RouteLeg, "lineName" | "toward" | "to"> & Partial<Pick<RouteLeg, "lineId" | "from">>, t: Copy, lang: Lang) {
+  const line = prettyLine(findLine(leg)?.name || leg.lineName || t.line, lang);
   const toward = displayName(cleanBound(leg.toward || leg.to?.name || ""), lang);
   if (!toward) return line;
   if (lang === "en") return `${line} ${t.boundFor} ${toward}`;
@@ -159,17 +159,32 @@ function cleanBound(s: string) {
 
 function prettyLine(raw: string, lang: Lang) {
   let n = (raw || "").trim().replace(/[Ｊｊ][Ｒｒ]/gu, "JR");
-  n = n.replace(/^(?:JR[\s　]*)+/iu, "");
+  n = n.replace(/アーバンパーク(?:ライン)?/u, "野田");
+  n = n.replace(/スカイツリー(?:ライン)?/u, "伊勢崎");
   n = n.replace(/[（(][^）)]{0,48}[）)]/gu, "");
-  n = n.replace(/[・･][^・･]*行$/u, "");
   n = n.replace(/各駅停車|各停|普通|快速|急行|特急|準急|通勤快速|区間快速|快速列車/gu, "");
+  if (/[・･]/.test(n)) {
+    const parts = n.split(/[・･]/u).map((p) => p.trim()).filter(Boolean);
+    const withSen = parts.find((p) => /[線线]/.test(p));
+    if (withSen) n = withSen;
+  }
+  n = n.replace(/[・･][^・･]*行$/u, "");
+  n = n.replace(/^(?:JR[\s\u3000]*)+(?:(?:東日本|西日本|東海|北海道|九州|四国)(?:旅客鉄道)?(?![道線线]))?/iu, "");
+  n = n.replace(/^東京地下鉄/u, "メトロ").replace(/^東京メトロ/u, "メトロ");
+  n = n.replace(/^東武鉄道/u, "東武").replace(/^西武鉄道/u, "西武");
+  n = n.replace(/^京成電鉄/u, "京成").replace(/^京王電鉄/u, "京王");
+  n = n.replace(/^京浜急行(?:電鉄)?/u, "京急").replace(/^東急電鉄|^東京急行電鉄/u, "東急");
+  n = n.replace(/^小田急電鉄/u, "小田急").replace(/^名古屋鉄道/u, "名鉄");
+  n = n.replace(/^近畿日本鉄道/u, "近鉄").replace(/^南海電気鉄道/u, "南海");
+  n = n.replace(/^阪急電鉄/u, "阪急").replace(/^阪神電気鉄道/u, "阪神").replace(/^相模鉄道/u, "相鉄");
+  n = n.replace(/^[・･\s\u3000]+/u, "");
   n = n.replace(/線線/gu, "線").replace(/线线/gu, "线").trim();
   const privateOp = /地下鉄|メトロ|都営|東武|西武|京成|京急|東急|小田急|京王|名鉄|近鉄|南海|阪急|阪神/.test(n);
   const jr =
     !privateOp &&
     /山手|中央|総武|京浜|根岸|埼京|京葉|常磐|東海道|横須賀|宇都宮|高崎|湘南|南武|武蔵野|青梅|横浜|内房|外房|成田|常盘/.test(n);
   let shown = displayName(jr ? `JR${n}` : n, lang).replace(/[Ｊｊ][Ｒｒ]/gu, "JR");
-  shown = shown.replace(/^(?:JR[\s　]*)+/iu, "JR");
+  shown = shown.replace(/^(?:JR[\s\u3000]*)+/iu, "JR");
   if (shown && !/線|线|新幹線|新干线|Line/i.test(shown)) shown += lang === "zh" ? "线" : lang === "en" ? "" : "線";
   if (lang !== "en") shown = shown.replace(/\s+/g, "");
   return shown;
@@ -245,6 +260,31 @@ function statusExtra(leg: RouteLeg, train: Train | null, t: Copy, lang: Lang, tr
   return { text: head ? `${head}（${bits.join("・")}）` : bits.join("・"), alert: delayed };
 }
 
+function walkBit(min: number, t: Copy) {
+  const n = Math.round(min);
+  if (n <= 0) return "";
+  return `${t.walkAbout}${n}${t.min}`;
+}
+
+function xferWalkMinutes(legs: RouteLeg[], rideI: number) {
+  let seen = -1;
+  let prevAt = -1;
+  for (let i = 0; i < legs.length; i++) {
+    if (legs[i]!.kind !== "ride") continue;
+    seen += 1;
+    if (seen === rideI) {
+      if (rideI <= 0 || prevAt < 0) return 0;
+      let m = 0;
+      for (let j = prevAt + 1; j < i; j++) {
+        if (legs[j]!.kind === "walk") m += legs[j]!.minutes;
+      }
+      return m;
+    }
+    prevAt = i;
+  }
+  return 0;
+}
+
 export function journeyGuide(journey: Journey, train: Train | null, t: Copy) {
   const lang = useMapStore.getState().lang;
   const live = useMapStore.getState().liveTrains;
@@ -263,7 +303,7 @@ export function journeyGuide(journey: Journey, train: Train | null, t: Copy) {
   const cur = rides[idx] ?? rides[0];
   const toward = cur?.toward || cur?.to.name || "";
   const head = cur
-    ? rideHeadline({ lineName: cur.lineName, toward, to: cur.to }, t, lang)
+    ? rideHeadline({ lineName: cur.lineName, toward, to: cur.to, from: cur.from, lineId: cur.lineId }, t, lang)
     : train
       ? rideHeadline({ lineName: train.lineName, toward: train.dest, to: { name: train.dest, lng: 0, lat: 0, prefecture: "" } }, t, lang)
       : "";
@@ -276,7 +316,10 @@ export function journeyGuide(journey: Journey, train: Train | null, t: Copy) {
     const status = statusExtra(leg, liveTrain, t, lang, tripSec, delayAlert);
     const title = rideTitle(leg, t, lang);
     if (i === 0) steps.push({ kind: "head", text: title, extra: status.text, extraAlert: status.alert });
-    else steps.push({ kind: "xfer", text: `${t.transferColon}${title}`, extra: status.text, extraAlert: status.alert });
+    else {
+      const w = walkBit(xferWalkMinutes(timed, i), t);
+      steps.push({ kind: "xfer", text: `${t.transferColon}${w ? `${w} ` : ""}${title}`, extra: status.text, extraAlert: status.alert });
+    }
     const times = timeRow(leg, t, lang);
     if (times) steps.push({ kind: "time", text: times });
   });
@@ -300,7 +343,9 @@ export function transferLine(journey: Journey, t: Copy) {
   return rides
     .map((leg, i) => {
       const title = rideHeadline(leg, t, lang);
-      return i === 0 ? title : `${t.transfer} ${title}`;
+      if (i === 0) return title;
+      const w = walkBit(xferWalkMinutes(journey.legs, i), t);
+      return w ? `${t.transfer} ${w} ${title}` : `${t.transfer} ${title}`;
     })
     .filter(Boolean)
     .join(" · ");
@@ -541,14 +586,22 @@ export function RoutePanel({ journey }: { journey: Journey }) {
       </ul>
 
       <ol className="flex flex-col gap-2">
-        {journey.legs.map((leg, i) => (
+        {journey.legs.map((leg, i) => {
+          const prev = journey.legs[i - 1];
+          const xfer = i > 0 && leg.kind === "ride" && (prev?.kind === "ride" || (prev?.kind === "walk" && journey.legs[i - 2]?.kind === "ride"));
+          const xferMin = prev?.kind === "walk" && journey.legs[i - 2]?.kind === "ride" ? prev.minutes : 0;
+          return (
           <li key={`${leg.kind}-${leg.from.name}-${leg.to.name}-${i}`}>
-            {i > 0 && journey.legs[i - 1]?.kind === "ride" && leg.kind === "ride" ? (
-              <p className="mb-1.5 px-1 text-xs text-fg-muted">{t.transfer}</p>
+            {xfer ? (
+              <p className="mb-1.5 px-1 text-xs text-fg-muted">
+                {t.transfer}
+                {xferMin ? ` ${walkBit(xferMin, t)}` : ""}
+              </p>
             ) : null}
             <LegCard leg={leg} t={t} />
           </li>
-        ))}
+          );
+        })}
       </ol>
     </section>
   );

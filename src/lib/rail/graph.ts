@@ -614,12 +614,13 @@ export function pathForRide(
 }
 
 export function attachTrack(journey: Journey, lines: LineRuntime[], index: Map<string, StationHit> = new Map()): Journey {
+  const official = journey.source === "yahoo" || journey.source === "google";
   const legs: RouteLeg[] = journey.legs.map((leg) => {
     const from = locateStation(leg.from.name, lines, index, leg.from);
     const to = locateStation(leg.to.name, lines, index, leg.to);
     if (leg.kind !== "ride") {
       const hop = haversine([from.lng, from.lat], [to.lng, to.lat]);
-      if (hop > 2.4) {
+      if (!official && hop > 2.4) {
         const routed = densifyRailPath(from, to, lines, index, { ...leg, kind: "ride", from, to });
         if (routed.path.length >= 4) {
           return {

@@ -24,7 +24,7 @@ import {
 import type { Journey, LineRuntime, RouteLeg, StationHit, Train } from "@/lib/rail/types";
 import { Button } from "@/components/ui/button";
 import { applyMateTrip, calibrateTrain, calibrateStation, fillPickedStation, locateUser } from "@/components/app/search-panel";
-import { findLineForLeg, locateStation, sliceRailPath } from "@/lib/rail/graph";
+import { findLineForLeg, locateStation, sliceRailPath, densifyRailPath } from "@/lib/rail/graph";
 import { placeTrainOnLeg, stopIndexByName } from "@/lib/rail/timetable-snap";
 import { arrivalCompare, journeyGuide, rideHeadline } from "@/components/app/route-panel";
 import { focusStay } from "@/components/app/stay-catalog";
@@ -1157,54 +1157,6 @@ let segsCache: { key: string; segs: { color: string; pts: [number, number][]; wa
   segs: [],
 };
 
-function clipPathBetween(
-  pts: [number, number][],
-  from: { lng: number; lat: number },
-  to: { lng: number; lat: number },
-): [number, number][] {
-  if (pts.length < 2) return pts;
-  let ia = 0;
-  let ib = 0;
-  let da = Infinity;
-  let db = Infinity;
-  for (let i = 0; i < pts.length; i++) {
-    const p = pts[i]!;
-    const a = (p[0] - from.lng) ** 2 + (p[1] - from.lat) ** 2;
-    const b = (p[0] - to.lng) ** 2 + (p[1] - to.lat) ** 2;
-    if (a < da) {
-      da = a;
-      ia = i;
-    }
-    if (b < db) {
-      db = b;
-      ib = i;
-    }
-  }
-  if (ia === ib) return [];
-  const lo = Math.min(ia, ib);
-  const hi = Math.max(ia, ib);
-  const out = pts.slice(lo, hi + 1);
-  if (ia > ib) out.reverse();
-  return out;
-}
-
-function rideSegPath(
-  line: LineRuntime | null,
-  from: { lng: number; lat: number; name?: string },
-  to: { lng: number; lat: number; name?: string },
-  fallback: [number, number][] | undefined,
-): [number, number][] {
-  if (line) {
-    const sliced = sliceRailPath(line, from, to);
-    if (sliced.length >= 2) return sliced;
-  }
-  if (fallback && fallback.length > 2) {
-    const clipped = clipPathBetween(fallback, from, to);
-    if (clipped.length >= 2) return clipped;
-  }
-  return [];
-}
-
 function remainingJourneySegs(lines: LineRuntime[]) {
   const store = useMapStore.getState();
   const journey = store.journey;
@@ -1274,7 +1226,12 @@ function remainingJourneySegs(lines: LineRuntime[]) {
     const from = locateStation(leg.from.name, lines, index, leg.from);
     const to = locateStation(leg.to.name, lines, index, leg.to);
     const line = findLineForLeg(lines, index, { ...leg, from, to });
-    let pts = rideSegPath(line, from, to, leg.path);
+    let pts = line ? sliceRailPath(line, from, to) : [];
+    if (pts.length < 2 && leg.path && leg.path.length > 2) pts = leg.path.slice();
+    if (pts.length < 3) {
+      const routed = densifyRailPath(from, to, lines, index, { ...leg, from, to });
+      if (routed.path.length >= 2) pts = routed.path;
+    }
     if (pts.length < 2 && shopTrip) {
       pts = [
         [from.lng, from.lat],

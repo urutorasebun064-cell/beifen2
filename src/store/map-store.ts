@@ -327,28 +327,41 @@ export const useMapStore = create<MapStore>((set, get) => ({
   setStayChat: (stayChat) => set({ stayChat }),
   konbiniBrand: null,
   setKonbiniBrand: (konbiniBrand) =>
-    set((s) => ({
-      konbiniBrand,
-      konbiniStores: !konbiniBrand
-        ? []
-        : konbiniBrand === "all"
-          ? s.konbiniStores
-          : s.konbiniStores.filter((row) => row.brand === konbiniBrand),
-      konbiniLoading: Boolean(konbiniBrand),
-      konbiniWalk: konbiniBrand ? s.konbiniWalk : false,
-      selectedKonbini: konbiniBrand === "all" ? s.selectedKonbini : konbiniBrand && s.selectedKonbini?.brand === konbiniBrand ? s.selectedKonbini : null,
-      konbiniScreen: konbiniBrand ? s.konbiniScreen : null,
-      konbiniChat: konbiniBrand ? s.konbiniChat : false,
-      ...(konbiniBrand
-        ? {
-            stayLayer: false,
-            selectedStay: null,
-            stayScreen: null,
-            stayWalk: false,
-            stayChat: false,
-          }
-        : {}),
-    })),
+    set((s) => {
+      const dropStay = Boolean(konbiniBrand && (s.stayWalk || s.selectedStay || s.stayLayer || s.journey?.walkToDestMin));
+      return {
+        konbiniBrand,
+        konbiniStores: !konbiniBrand
+          ? []
+          : konbiniBrand === "all"
+            ? s.konbiniStores
+            : s.konbiniStores.filter((row) => row.brand === konbiniBrand),
+        konbiniLoading: Boolean(konbiniBrand),
+        konbiniWalk: konbiniBrand ? s.konbiniWalk : false,
+        selectedKonbini: konbiniBrand === "all" ? s.selectedKonbini : konbiniBrand && s.selectedKonbini?.brand === konbiniBrand ? s.selectedKonbini : null,
+        konbiniScreen: konbiniBrand ? s.konbiniScreen : null,
+        konbiniChat: konbiniBrand ? s.konbiniChat : false,
+        ...(konbiniBrand
+          ? {
+              stayLayer: false,
+              selectedStay: null,
+              stayScreen: null,
+              stayWalk: false,
+              stayChat: false,
+            }
+          : {}),
+        ...(dropStay
+          ? {
+              destStation: null,
+              journey: null,
+              journeys: [],
+              journeyIndex: 0,
+              selectedTrain: null,
+              followTrainId: null,
+            }
+          : {}),
+      };
+    }),
   konbiniStores: [],
   setKonbiniStores: (konbiniStores) => set({ konbiniStores }),
   konbiniLoading: false,

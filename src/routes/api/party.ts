@@ -1,14 +1,9 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { createHash } from "node:crypto";
-import { createRequire } from "node:module";
+import { createECDH, createHash } from "node:crypto";
 import { dirname, join } from "node:path";
 import { createFileRoute } from "@tanstack/react-router";
 import { getSql } from "@/lib/db";
 import { hanFold } from "@/lib/han";
-
-const require = createRequire(import.meta.url);
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const webpush = require("web-push") as any;
 
 const PARTY_MAX = 5;
 const AWAY_MS = 90 * 1000;
@@ -36,6 +31,17 @@ const gone: Map<string, number> =
 
 type Vapid = { publicKey: string; privateKey: string };
 type GV = typeof globalThis & { __jbPartyVapid?: Vapid };
+
+function b64url(buf: Buffer) {
+  return buf.toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+function makeVapid(): Vapid {
+  const curve = createECDH("prime256v1");
+  curve.generateKeys();
+  return { publicKey: b64url(curve.getPublicKey()), privateKey: b64url(curve.getPrivateKey()) };
+}
+
 function loadVapid(): Vapid {
   const g = globalThis as GV;
   if (g.__jbPartyVapid?.publicKey && g.__jbPartyVapid.privateKey) return g.__jbPartyVapid;
@@ -48,7 +54,7 @@ function loadVapid(): Vapid {
   } catch {
     /* */
   }
-  const keys = webpush.generateVAPIDKeys();
+  const keys = makeVapid();
   g.__jbPartyVapid = keys;
   try {
     mkdirSync(dirname(VAPID_FILE), { recursive: true });
@@ -60,7 +66,11 @@ function loadVapid(): Vapid {
 }
 
 function vapidPub() {
-  return loadVapid().publicKey;
+  try {
+    return loadVapid().publicKey;
+  } catch {
+    return "";
+  }
 }
 
 async function ensureVapid() {
@@ -81,14 +91,27 @@ async function ensureVapid() {
     if (stored?.publicKey && stored.privateKey) g.__jbPartyVapid = stored;
     return g.__jbPartyVapid ?? keys;
   } catch {
-    return loadVapid();
+    try {
+      return loadVapid();
+    } catch {
+      return null;
+    }
   }
 }
 
 async function pingPush(room: Room, exceptId: string, title: string, body: string) {
-  const keys = loadVapid();
+  const keys = await ensureVapid();
+  if (!keys?.publicKey || !keys.privateKey) return;
+  let wp: { setVapidDetails: (a: string, b: string, c: string) => void; sendNotification: (sub: unknown, payload: string) => Promise<unknown> } | null = null;
   try {
-    webpush.setVapidDetails("mailto:party@jbmap.app", keys.publicKey, keys.privateKey);
+    const mod = await import("web-push");
+    wp = (mod as { default?: typeof wp }).default ?? (mod as typeof wp);
+  } catch {
+    return;
+  }
+  if (!wp) return;
+  try {
+    wp.setVapidDetails("mailto:party@jbmap.app", keys.publicKey, keys.privateKey);
   } catch {
     return;
   }
@@ -96,7 +119,7 @@ async function pingPush(room: Room, exceptId: string, title: string, body: strin
   const jobs = room.members
     .filter((m) => m.id !== exceptId && m.push?.endpoint && m.push.p256dh && m.push.auth)
     .map((m) =>
-      webpush
+      wp
         .sendNotification({ endpoint: m.push!.endpoint, keys: { p256dh: m.push!.p256dh, auth: m.push!.auth } }, payload)
         .catch(() => {
           m.push = undefined;
@@ -714,7 +737,6 @@ export const Route = createFileRoute("/api/party")({
   server: {
     handlers: {
       GET: async ({ request }) => {
-        await ensureVapid();
         const url = new URL(request.url);
         if (url.searchParams.get("list") === "1") {
           hydrateFile();
@@ -766,7 +788,6 @@ export const Route = createFileRoute("/api/party")({
         return json({ ok: true, vapid: vapidPub(), ...publicOf(room, me.id, wasQ), you: me.nick, youId: me.id, host: me.id === room.hostId });
       },
       POST: async ({ request }) => {
-        await ensureVapid();
         let body: {
           action?: string;
           room?: string;
@@ -886,7 +907,11 @@ export const Route = createFileRoute("/api/party")({
           trimMessages(room);
           bumpTtl(room);
           await saveRoom(found.key, room);
-          await pingPush(room, me.id, room.name, `${me.nick}: ${text}`);
+          try {
+            await pingPush(room, me.id, room.name, `${me.nick}: ${text}`);
+          } catch {
+            /* */
+          }
           return json({ ok: true, vapid: vapidPub(), ...publicOf(room, me.id, was), you: me.nick, youId: me.id, host: me.id === room.hostId });
         }
         if (action === "share") {

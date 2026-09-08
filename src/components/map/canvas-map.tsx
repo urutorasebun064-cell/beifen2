@@ -1162,8 +1162,9 @@ function remainingJourneySegs(lines: LineRuntime[]) {
   const train = store.selectedTrain;
   const segs: { color: string; pts: [number, number][]; walk: boolean; minutes?: number; shop?: boolean }[] = [];
   const index = store.stationIndex;
+  const here = store.userLocation;
   const key = journey
-    ? `j:${journey.origin.name}|${journey.dest.name}|${journey.departHhmm}|${journey.arriveHhmm}|${journey.legs.map((l) => `${l.kind}:${l.from.name}>${l.to.name}`).join(",")}|${store.stayWalk ? 1 : 0}|${store.mateWalk ? 1 : 0}|${lines.length}`
+    ? `j:${journey.origin.name}|${journey.dest.name}|${journey.departHhmm}|${journey.arriveHhmm}|${journey.legs.map((l) => `${l.kind}:${l.from.name}>${l.to.name}`).join(",")}|${store.stayWalk ? 1 : 0}|${store.mateWalk ? 1 : 0}|${train?.id ?? ""}|${train ? train.lng.toFixed(3) : ""}|${here ? here.lng.toFixed(3) : ""}|${here ? here.lat.toFixed(3) : ""}|${lines.length}`
     : train && train.kind !== "flight"
       ? `t:${train.id}|${train.dest}|${train.lng.toFixed(3)}|${train.lat.toFixed(3)}|${lines.length}`
       : "";
@@ -1193,25 +1194,45 @@ function remainingJourneySegs(lines: LineRuntime[]) {
     return segs;
   }
 
+  const destPt = { lng: journey.dest.lng, lat: journey.dest.lat };
+  if (here && Number.isFinite(destPt.lng) && haversine([here.lng, here.lat], [destPt.lng, destPt.lat]) < 0.05) {
+    segsCache = { key, segs };
+    return segs;
+  }
+
+  let currentRide = -1;
+  if (train && train.kind !== "flight") {
+    let ri = 0;
+    for (const leg of journey.legs) {
+      if (leg.kind !== "ride") continue;
+      if (lineMatchesLeg(train, leg) && sameWay(train, leg, lines)) {
+        currentRide = ri;
+        break;
+      }
+      ri += 1;
+    }
+  }
+
   const shopTrip = Boolean(journey.walkToDestMin);
+  let rideIdx = -1;
   for (let i = 0; i < journey.legs.length; i++) {
     const leg = journey.legs[i]!;
     if (leg.kind === "walk") {
       const from =
         shopTrip && Number.isFinite(leg.from.lng) ? leg.from : locateStation(leg.from.name, lines, index, leg.from);
       const to = shopTrip && Number.isFinite(leg.to.lng) ? leg.to : locateStation(leg.to.name, lines, index, leg.to);
-      const hop = haversine([from.lng, from.lat], [to.lng, to.lat]);
+      const start = here && haversine([here.lng, here.lat], [to.lng, to.lat]) < haversine([from.lng, from.lat], [to.lng, to.lat]) + 0.02
+        ? here
+        : from;
+      const hop = haversine([start.lng, start.lat], [to.lng, to.lat]);
       const shop = shopTrip && i === journey.legs.length - 1;
-      if (shop && useMapStore.getState().stayWalk) continue;
+      if (shop && (store.stayWalk || store.mateWalk)) continue;
       if (!shop && hop > 1.8) continue;
-      if (hop < 0.03) continue;
-      const pts: [number, number][] =
-        shop && leg.path && leg.path.length >= 2
-          ? leg.path.slice()
-          : [
-              [from.lng, from.lat],
-              [to.lng, to.lat],
-            ];
+      if (hop < 0.05) continue;
+      const pts: [number, number][] = [
+        [start.lng, start.lat],
+        [to.lng, to.lat],
+      ];
       segs.push({
         color: shop ? "#ffe08a" : CREAM,
         pts,
@@ -1221,6 +1242,8 @@ function remainingJourneySegs(lines: LineRuntime[]) {
       });
       continue;
     }
+    rideIdx += 1;
+    if (currentRide >= 0 && rideIdx < currentRide) continue;
     const from = locateStation(leg.from.name, lines, index, leg.from);
     const to = locateStation(leg.to.name, lines, index, leg.to);
     const line = findLineForLeg(lines, index, { ...leg, from, to });
@@ -1232,6 +1255,8 @@ function remainingJourneySegs(lines: LineRuntime[]) {
         [to.lng, to.lat],
       ];
     }
+    if (pts.length < 2) continue;
+    if (currentRide >= 0 && rideIdx === currentRide && train) pts = clipFromTrain(pts, train.lng, train.lat);
     if (pts.length < 2) continue;
     segs.push({ color: line?.color || leg.color || CREAM, pts, walk: false });
   }
@@ -4123,7 +4148,7 @@ export function CanvasMap() {
             const [sx, sy] = project(mateWalkTo.lng, mateWalkTo.lat, camRef.current, w, h);
             if (Number.isFinite(sx) && Number.isFinite(sy)) {
               const m = haversine([user.lng, user.lat], [mateWalkTo.lng, mateWalkTo.lat]) * 1000;
-              drawWalkGuide(ctx, x, y, sx, sy, "#ffe08a", m);
+              if (m >= 50) drawWalkGuide(ctx, x, y, sx, sy, "#ffe08a", m);
             }
           }
         }

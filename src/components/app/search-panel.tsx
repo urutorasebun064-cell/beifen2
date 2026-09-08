@@ -895,6 +895,12 @@ export async function applyStayTrip(stay: Stay) {
 export async function applyMateTrip(mate: { nick: string; lng: number; lat: number }) {
   const s = useMapStore.getState();
   const loc = s.userLocation ?? NODA;
+  const meetKm = haversine([loc.lng, loc.lat], [mate.lng, mate.lat]);
+  if (meetKm < 0.05) {
+    s.setMateWalk(false);
+    s.requestFlyTo({ lng: mate.lng, lat: mate.lat, bearing: 0, pitch: 0.55 });
+    return true;
+  }
   const fromNear = stationsNearPlace(s.stationIndex, loc.lng, loc.lat, 1)[0];
   const toNear = stationsNearPlace(s.stationIndex, mate.lng, mate.lat, 1)[0];
   if (!fromNear || !toNear) return false;
@@ -920,7 +926,7 @@ export async function applyMateTrip(mate: { nick: string; lng: number; lat: numb
   const mateStop: RouteStop = { name: mate.nick, lng: mate.lng, lat: mate.lat, prefecture: "" };
   const originWalk =
     fromNear.km >= 0.08 ? { min: walkMinutes(fromNear.km), from: gps, to: originStop } : undefined;
-  const mateKm = haversine([toNear.station.lng, toNear.station.lat], [mate.lng, mate.lat]);
+  const mateKm = Math.min(meetKm, haversine([toNear.station.lng, toNear.station.lat], [mate.lng, mate.lat]));
   const shopWalk = mateKm >= 0.05 ? { min: walkMinutes(mateKm), from: destStop, to: mateStop } : undefined;
   const st = useMapStore.getState();
   const patched = st.journeys.length

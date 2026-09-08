@@ -72,10 +72,10 @@ export const Route = createFileRoute("/api/transit")({
         const dpf = (url.searchParams.get("dpf") ?? "").trim();
         if (!from || !to) return Response.json({ ok: false, error: "missing" });
         const clock = tokyoParts();
-        const hh = Number(url.searchParams.get("hh") ?? clock.hour);
-        const mm = Number(url.searchParams.get("mm") ?? clock.minute);
         const rawType = url.searchParams.get("type") ?? "1";
         const type = rawType === "4" || rawType === "3" || rawType === "2" ? rawType : "1";
+        const hh = type === "1" ? clock.hour : Number(url.searchParams.get("hh") ?? clock.hour);
+        const mm = type === "1" ? clock.minute : Number(url.searchParams.get("mm") ?? clock.minute);
         const qmin = hh * 60 + mm;
         const tomorrow = clock.minutes >= 21 * 60 && (type === "3" || qmin < 6 * 60);
         const [y, mo, d] = ymdTokyo(tomorrow ? new Date(Date.now() + 12 * 3600 * 1000) : new Date()).split("-");

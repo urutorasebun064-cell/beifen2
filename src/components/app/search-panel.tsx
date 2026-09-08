@@ -293,26 +293,16 @@ export async function applyTrip(origin: StationHit | { lng: number; lat: number 
     "name" in origin && origin.name
       ? origin.name
       : stationsNearPlace(useMapStore.getState().stationIndex, origin.lng, origin.lat, 1)[0]?.station.name ?? "";
-  const nowMin = tokyoParts(simNow()).minutes;
-  const night = afterLastTrain(nowMin);
-  const time = tokyoClockParams();
   const journeys: Journey[] = [];
-  const lastTrains: Journey[] = [];
-  const firstTrains: Journey[] = [];
-  const seen = new Set<string>();
-  const jobs: Promise<void>[] = [];
-  const ingest = (data: { ok?: boolean; journey?: Journey; journeys?: Journey[] }, into: Journey[], unique = false) => {
+  const ingest = (data: { ok?: boolean; journey?: Journey; journeys?: Journey[] }, into: Journey[]) => {
     if (data.ok === false) return;
     const list = data.journeys?.length ? data.journeys : data.journey ? [data.journey] : [];
     for (const j of list) {
-      if (!j) continue;
-      const pinned = pinJourneyDest(j, dest);
-      if (j.source === "yahoo") into.push(pinned);
-      else if (unique) pushJourney(into, seen, pinned);
-      else into.push(pinned);
+      if (!j || j.source !== "yahoo") continue;
+      into.push(pinJourneyDest(j, dest));
     }
   };
-  if (oName) {
+  const pullYahoo = async (type: string, hh?: number, mm?: number) => {
     const qs = new URLSearchParams({
       from: oName,
       to: dest.name,
@@ -322,111 +312,48 @@ export async function applyTrip(origin: StationHit | { lng: number; lat: number 
       dlng: String(dest.lng),
       opf: "prefecture" in origin ? origin.prefecture ?? "" : "",
       dpf: dest.prefecture ?? "",
-      hh: String(time.hour),
-      mm: String(time.minute),
-      type: "1",
+      type,
     });
-    jobs.push(
-      fetch(`/api/transit?${qs}`, { signal: AbortSignal.timeout(14000) })
-        .then((res) => res.json() as Promise<{ ok?: boolean; journey?: Journey; journeys?: Journey[] }>)
-        .then((data) => ingest(data, journeys, true))
-        .catch(() => undefined),
-    );
-    if (lastTrainWindow(nowMin)) {
-      const lastQs = new URLSearchParams(qs);
-      lastQs.set("type", "2");
-      jobs.push(
-        fetch(`/api/transit?${lastQs}`, { signal: AbortSignal.timeout(14000) })
-          .then((res) => res.json() as Promise<{ ok?: boolean; journey?: Journey; journeys?: Journey[] }>)
-          .then((data) => ingest(data, lastTrains))
-          .catch(() => undefined),
-      );
+    if (hh != null) qs.set("hh", String(hh));
+    if (mm != null) qs.set("mm", String(mm));
+    const rows: Journey[] = [];
+    try {
+      const res = await fetch(`/api/transit?${qs}`, { signal: AbortSignal.timeout(14000) });
+      ingest((await res.json()) as { ok?: boolean; journey?: Journey; journeys?: Journey[] }, rows);
+    } catch {
+      /* keep empty */
     }
-    if (firstTrainWindow(nowMin)) {
-      const firstQs = new URLSearchParams(qs);
-      firstQs.set("type", "3");
-      firstQs.set("hh", "4");
-      firstQs.set("mm", "50");
-      jobs.push(
-        fetch(`/api/transit?${firstQs}`, { signal: AbortSignal.timeout(14000) })
-          .then((res) => res.json() as Promise<{ ok?: boolean; journey?: Journey; journeys?: Journey[] }>)
-          .then((data) => ingest(data, firstTrains))
-          .catch(() => undefined),
-      );
-      const mornQs = new URLSearchParams(qs);
-      mornQs.set("type", "1");
-      mornQs.set("hh", "4");
-      mornQs.set("mm", "50");
-      jobs.push(
-        fetch(`/api/transit?${mornQs}`, { signal: AbortSignal.timeout(14000) })
-          .then((res) => res.json() as Promise<{ ok?: boolean; journey?: Journey; journeys?: Journey[] }>)
-          .then((data) => ingest(data, firstTrains))
-          .catch(() => undefined),
-      );
-    }
-  }
-  {
-    const { googleKey, lang } = useMapStore.getState();
-    const key = googleKey.trim();
-    const params = new URLSearchParams({
-      olat: String(origin.lat),
-      olng: String(origin.lng),
-      dlat: String(dest.lat),
-      dlng: String(dest.lng),
-      oname: oName,
-      dname: dest.name,
-      lang,
-    });
-    if (night) params.set("at", String(Math.floor(simNow().getTime() / 1000)));
-    jobs.push(
-      fetch(`/api/google?${params}`, {
-        ...(key ? { headers: { "x-google-key": key } } : {}),
-        signal: AbortSignal.timeout(5000),
-      })
-        .then((res) => res.json() as Promise<{ ok?: boolean; journey?: Journey; journeys?: Journey[] }>)
-        .then((data) => {
-          if (data.ok === false) return;
-          if (data.journeys?.length) data.journeys.forEach((j) => pushJourney(journeys, seen, pinJourneyDest(j, dest)));
-          else if (data.journey) pushJourney(journeys, seen, pinJourneyDest(data.journey, dest));
-        })
-        .catch(() => undefined),
-    );
-  }
+    return rows;
+  };
   try {
-    await Promise.all(jobs);
+    if (oName) {
+      const due = (j: Journey) => departDue(j.departHhmm, tokyoParts(simNow()).minutes) >= 0;
+      let yahoo = await pullYahoo("1");
+      let live = yahoo.filter(due);
+      if (!live.length) {
+        const last = await pullYahoo("2");
+        live = last.filter(due);
+      }
+      if (!live.length) {
+        const firsts = await pullYahoo("3", 4, 50);
+        live = firsts.filter(due);
+        if (!live.length) live = firsts;
+      }
+      if (live.length) journeys.push(...live);
+    }
   } finally {
     const nowMin = tokyoParts(simNow()).minutes;
     const stillDue = (j: Journey) => departDue(j.departHhmm, nowMin) >= 0;
     const yahooAll = journeys.filter((j) => j.source === "yahoo");
-    const google = journeys.filter((j) => j.source === "google");
-    let live: Journey[] = [];
-    if (yahooAll.length) {
-      const due = yahooAll.filter(stillDue);
-      live = due.length ? due : yahooAll;
-    } else if (google.length) {
-      const due = google.filter((j) => stillDue(j) && journeyEndsNear(j, dest));
-      live = due.length ? due : google.filter((j) => journeyEndsNear(j, dest));
-    }
-    if (!live.length) {
-      const firsts = firstTrains.filter((j) => stillDue(j) && journeyEndsNear(j, dest));
-      if (firsts.length) live = firsts;
-    }
-    if (!live.length) {
-      const local = localJourneys(origin, dest);
-      for (const j of liveJourneys(origin, dest)) pushJourney(local.list, local.seen, j);
-      live = preferOfficial(local.list).filter((j) => stillDue(j) && journeyEndsNear(j, dest));
-    }
+    let live: Journey[] = yahooAll.filter(stillDue);
+    if (!live.length) live = yahooAll;
     const store = useMapStore.getState();
     if (!live.length) {
       store.setJourneys([]);
       if (!silent) store.setSearching(false);
       return;
     }
-    const tonight = !yahooAll.length && lastTrainWindow(nowMin) && live.some((j) => departDue(j.departHhmm, nowMin) < 180);
-    const merged = tonight
-      ? appendLastTrains(live.slice(0, 10), lastTrains.filter(stillDue), nowMin)
-      : live.slice(0, 10);
-    const shown = merged.map((j) => stampJourneyDelay(j, store.liveTrains));
+    const shown = live.slice(0, 10).map((j) => stampJourneyDelay(j, store.liveTrains));
     const keep = shown.filter((j) => departDue(j.departHhmm, nowMin) >= 0);
     const final = keep.length ? keep : shown;
     if (!final.length) {

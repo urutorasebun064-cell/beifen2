@@ -1157,51 +1157,42 @@ let segsCache: { key: string; segs: { color: string; pts: [number, number][]; wa
   segs: [],
 };
 
+function lineWithBoth(lines: LineRuntime[], fromName: string, toName: string, preferName = "") {
+  const prefer = preferName.replace(/^JR/u, "").replace(/線$/u, "").replace(/アーバンパーク(?:ライン)?/u, "野田").trim();
+  let named: LineRuntime | null = null;
+  let namedSpan = Infinity;
+  let any: LineRuntime | null = null;
+  let anySpan = Infinity;
+  for (const line of lines) {
+    const ia = stopIndexByName(line, fromName);
+    const ib = stopIndexByName(line, toName);
+    if (ia < 0 || ib < 0 || ia === ib) continue;
+    const span = Math.abs(ib - ia);
+    const hit = Boolean(prefer) && (line.name.includes(prefer) || prefer.includes(line.name.replace(/^JR/u, "").replace(/線$/u, "")));
+    if (hit && span < namedSpan) {
+      named = line;
+      namedSpan = span;
+    }
+    if (span < anySpan) {
+      any = line;
+      anySpan = span;
+    }
+  }
+  return named ?? any;
+}
+
 function rideGlowPath(
   line: LineRuntime | null,
-  from: { lng: number; lat: number; name: string },
-  to: { lng: number; lat: number; name: string },
-  fallback?: [number, number][],
+  fromName: string,
+  toName: string,
 ): [number, number][] {
-  if (line) {
-    const ia = from.name ? stopIndexByName(line, from.name) : -1;
-    const ib = to.name ? stopIndexByName(line, to.name) : -1;
-    if (ia >= 0 && ib >= 0 && ia !== ib) {
-      const a = line.stops[ia]!;
-      const b = line.stops[ib]!;
-      const sliced = sliceRailPath(line, { lng: a.lng, lat: a.lat, name: a.n }, { lng: b.lng, lat: b.lat, name: b.n });
-      if (sliced.length >= 2) return sliced;
-    }
-    const sliced = sliceRailPath(line, from, to);
-    if (sliced.length >= 2) return sliced;
-  }
-  if (fallback && fallback.length > 2) {
-    let ia = 0;
-    let ib = 0;
-    let da = Infinity;
-    let db = Infinity;
-    for (let i = 0; i < fallback.length; i++) {
-      const p = fallback[i]!;
-      const a = (p[0] - from.lng) ** 2 + (p[1] - from.lat) ** 2;
-      const b = (p[0] - to.lng) ** 2 + (p[1] - to.lat) ** 2;
-      if (a < da) {
-        da = a;
-        ia = i;
-      }
-      if (b < db) {
-        db = b;
-        ib = i;
-      }
-    }
-    if (ia !== ib) {
-      const lo = Math.min(ia, ib);
-      const hi = Math.max(ia, ib);
-      const out = fallback.slice(lo, hi + 1);
-      if (ia > ib) out.reverse();
-      if (out.length >= 2) return out;
-    }
-  }
-  return [];
+  if (!line) return [];
+  const ia = stopIndexByName(line, fromName);
+  const ib = stopIndexByName(line, toName);
+  if (ia < 0 || ib < 0 || ia === ib) return [];
+  const a = line.stops[ia]!;
+  const b = line.stops[ib]!;
+  return sliceRailPath(line, { lng: a.lng, lat: a.lat, name: a.n }, { lng: b.lng, lat: b.lat, name: b.n });
 }
 
 function remainingJourneySegs(lines: LineRuntime[]) {
@@ -1272,8 +1263,13 @@ function remainingJourneySegs(lines: LineRuntime[]) {
     }
     const from = locateStation(leg.from.name, lines, index, leg.from);
     const to = locateStation(leg.to.name, lines, index, leg.to);
-    const line = findLineForLeg(lines, index, { ...leg, from, to });
-    let pts = rideGlowPath(line, from, to, leg.path);
+    const line = lineWithBoth(lines, leg.from.name, leg.to.name, leg.lineName ?? "");
+    let pts = rideGlowPath(line, leg.from.name, leg.to.name);
+    if (pts.length >= 2 && train && train.kind !== "flight") {
+      const near = nearestPathIndex(pts, train.lng, train.lat);
+      const d = haversine(pts[near] ?? pts[0]!, [train.lng, train.lat]);
+      if (d < 1.2) pts = clipFromTrain(pts, train.lng, train.lat);
+    }
     if (pts.length < 2 && shopTrip) {
       pts = [
         [from.lng, from.lat],
@@ -3839,8 +3835,6 @@ export function CanvasMap() {
           if (hovering || on) trainCards.push({ t: shown, x, y, on });
         }
 
-        drawJourneyPulse(ctx, camRef.current, w, h, ts, lineRef.current, "ride");
-
         for (const mark of delayMarks) {
           drawDelayChip(ctx, mark.x, mark.y, mark.sec, useMapStore.getState().lang);
         }
@@ -3926,6 +3920,8 @@ export function CanvasMap() {
             n += 1;
           }
         }
+
+        drawJourneyPulse(ctx, camRef.current, w, h, ts, lineRef.current, "ride");
 
         if (trainCards.length) {
           const loc = useMapStore.getState().lang;

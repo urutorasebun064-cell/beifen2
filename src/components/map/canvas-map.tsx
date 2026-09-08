@@ -26,7 +26,7 @@ import { calibrateTrain, calibrateStation, fillPickedStation, locateUser } from 
 import { findLineForLeg, locateStation, sliceRailPath } from "@/lib/rail/graph";
 import { placeTrainOnLeg, stopIndexByName } from "@/lib/rail/timetable-snap";
 import { arrivalCompare, journeyGuide, rideHeadline } from "@/components/app/route-panel";
-import { closeStay, focusStay } from "@/components/app/stay-catalog";
+import { focusStay } from "@/components/app/stay-catalog";
 import { focusKonbini } from "@/components/app/konbini-panel";
 import { KONBINI_META, konbiniLabel, konbiniRingM, metersTo, pullKonbini } from "@/lib/konbini";
 import { drawRadarLayer, RADAR_JAPAN_LAT, RADAR_JAPAN_LNG, RADAR_JAPAN_ZOOM } from "@/lib/radar";
@@ -4306,9 +4306,9 @@ export function CanvasMap() {
             return;
           }
         }
-        closeStay();
         return;
       }
+      if (useMapStore.getState().selectedKonbini) return;
       {
         const quakes = useMapStore.getState().quakes;
         let hitQ: (typeof quakes)[number] | null = null;
@@ -4405,7 +4405,7 @@ export function CanvasMap() {
           }
         }
         const s = useMapStore.getState();
-        if (s.journey || s.journeys.length) return;
+        if (s.journey || s.journeys.length || s.selectedStay || s.selectedKonbini || s.stayWalk || s.konbiniWalk) return;
         s.dismissPick();
         return;
       }
@@ -4424,7 +4424,7 @@ export function CanvasMap() {
       }
       {
         const s = useMapStore.getState();
-        if (s.journey || s.journeys.length) return;
+        if (s.journey || s.journeys.length || s.selectedStay || s.selectedKonbini || s.stayWalk || s.konbiniWalk) return;
         s.dismissPick();
       }
     };

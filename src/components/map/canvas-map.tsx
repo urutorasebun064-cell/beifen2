@@ -7,10 +7,12 @@ import { bedFill, benioffPoint, BOX_FLOOR, crustKm, DEPTH_MARKS, depthAlt, geoFi
 import { copies, displayName, type Copy, type Lang } from "@/lib/i18n";
 import type { Quake } from "@/lib/quake";
 import { formatKm, haversine, nearestStationsFrom, NODA, stationsNearPlace, arriveHhmmOf, etaFromHhmm, parseHhmmMin } from "@/lib/rail/geo";
-import { lineVisible, nearestTrainAt, parseTrainId, simulateTrains, trainById } from "@/lib/rail/simulate";
+import { lineVisible, nearestTrainAt, parseTrainId, poseWithDelay, simulateTrains, trainById } from "@/lib/rail/simulate";
 import { mergeLive } from "@/lib/rail/live";
 import { delaySeconds } from "@/lib/rail/delay";
-import { smoothLiveOnTrack } from "@/lib/rail/realtime";
+import { getOfficialDia, getPinnedTrain, pinLivePosition, smoothLiveOnTrack } from "@/lib/rail/realtime";
+import { crowdDelayFor } from "@/lib/rail/crowd-delay";
+import { stampTrainsDia } from "@/lib/rail/yahoo";
 import type { LiveTrack } from "@/lib/rail/track-lerp";
 import {
   drawWeatherParticles,
@@ -3097,6 +3099,7 @@ export function CanvasMap() {
   const liveSmoothRef = useRef<Map<string, LiveTrack>>(new Map());
   const walkRef = useRef({ lng: 0, lat: 0, set: false, hdg: 0 });
   const lastLiveSnapRef = useRef<Train[] | null>(null);
+  const lastPinRef = useRef<Train | null>(null);
   const wxPoolRef = useRef<WxParticle[]>([]);
   const lastWxTsRef = useRef(0);
   const sizeRef = useRef({ w: 1, h: 1, dpr: 1 });
@@ -3591,14 +3594,28 @@ export function CanvasMap() {
           const now = simNow();
           const cap = z < 5.5 ? 0 : z >= 15.6 ? 2200 : z >= 13.8 ? 1600 : z >= 12 ? 1400 : z >= 10 ? 1100 : z >= 8 ? 800 : 420;
           const liveRaw = useMapStore.getState().viewTime ? [] : useMapStore.getState().liveTrains;
-          const snap = liveRaw.filter((t) => t.kind !== "bus" && (t.kind === "flight" || z >= 6));
-          const fresh = lastLiveSnapRef.current !== liveRaw;
-          if (fresh) lastLiveSnapRef.current = liveRaw;
+          const flights = liveRaw.filter((t) => t.kind === "flight");
+          const pin = getPinnedTrain();
+          const extra = pin && pin.kind !== "flight" && pin.kind !== "bus" ? [pin] : [];
+          const snap = flights.concat(extra);
+          const fresh = lastLiveSnapRef.current !== liveRaw || pin !== lastPinRef.current;
+          if (fresh) {
+            lastLiveSnapRef.current = liveRaw;
+            lastPinRef.current = pin;
+          }
           const live = smoothLiveOnTrack(liveSmoothRef.current, fresh ? snap : null, lineRef.current, ts);
-          trainsRef.current = mergeLive(
-            simulateTrains(lineRef.current, now, bounds, z, cap, followId, priority, false),
-            live,
-          ).filter((t) => t.kind !== "bus");
+          let sim = simulateTrains(lineRef.current, now, bounds, z, cap, followId, priority, false);
+          const dia = getOfficialDia();
+          if (dia.length) sim = stampTrainsDia(sim, dia);
+          sim = sim.map((t) => {
+            if (t.kind === "flight" || t.kind === "bus") return t;
+            const crowd = crowdDelayFor(t);
+            const delay = Math.max(t.delayMin, crowd);
+            if (delay <= 0) return t;
+            const line = lineRef.current.find((l) => l.id === t.lineId);
+            return line ? poseWithDelay(line, t, delay, now) : { ...t, delayMin: delay };
+          });
+          trainsRef.current = mergeLive(sim, live).filter((t) => t.kind !== "bus");
           const trip = useMapStore.getState().journey;
           if (trip) {
             trainsRef.current = relatedTrainsForJourney(
@@ -4314,7 +4331,12 @@ export function CanvasMap() {
         } else {
           s.selectTrain(ride);
           s.setFollowTrainId(null);
-          if (ride.kind !== "flight") void calibrateTrain(ride);
+          if (ride.kind !== "flight") {
+            void calibrateTrain(ride);
+            void pinLivePosition(ride, lineRef.current, useMapStore.getState().odptKey).then((next) => {
+              if (useMapStore.getState().selectedTrain?.id === ride.id) useMapStore.getState().selectTrain(next);
+            });
+          }
         }
         return true;
       };
@@ -4446,7 +4468,12 @@ export function CanvasMap() {
         } else {
           s.selectTrain(bestTrain);
           s.setFollowTrainId(null);
-          if (bestTrain.kind !== "flight") void calibrateTrain(bestTrain);
+          if (bestTrain.kind !== "flight") {
+            void calibrateTrain(bestTrain);
+            void pinLivePosition(bestTrain, lineRef.current, useMapStore.getState().odptKey).then((next) => {
+              if (useMapStore.getState().selectedTrain?.id === bestTrain.id) useMapStore.getState().selectTrain(next);
+            });
+          }
         }
         return;
       }

@@ -1,37 +1,132 @@
-import { liveToTrains, type LivePayload } from "./live";
+import { liveToTrains, railDriftKm, type LivePayload } from "./live";
 import { ingestLiveTracks, sampleLiveTracks, type LiveTrack } from "./track-lerp";
-import { stampTrainsDia } from "./yahoo";
+import { stampTrainsDia, type YahooDiaDelay } from "./yahoo";
 import type { LineRuntime, Train } from "./types";
 
-const INTERVAL_MS = 10_000;
+const INTERVAL_MS = 20_000;
 const TIMEOUT_MS = 10_000;
+const PIN_TTL = 180_000;
 
-export async function fetchLive(lines: LineRuntime[], odptKey = ""): Promise<{
+let officialDia: YahooDiaDelay[] = [];
+let pinned: { t: Train; at: number } | null = null;
+
+export function getOfficialDia(): YahooDiaDelay[] {
+  return officialDia;
+}
+
+export function getPinnedTrain(): Train | null {
+  if (!pinned) return null;
+  if (Date.now() - pinned.at > PIN_TTL) {
+    pinned = null;
+    return null;
+  }
+  return pinned.t;
+}
+
+export function clearPinnedTrain() {
+  pinned = null;
+}
+
+export async function fetchLive(lines: LineRuntime[], odptKey = "", mode: "flights" | "all" = "flights"): Promise<{
   trains: Train[];
   source: "odpt" | "live" | "sim";
   error: string | null;
+  dia: YahooDiaDelay[];
 }> {
   const ctrl = new AbortController();
   const timer = window.setTimeout(() => ctrl.abort(), TIMEOUT_MS);
   try {
-    const res = await fetch("/api/live", {
+    const qs = mode === "flights" ? "?flights=1" : "";
+    const res = await fetch(`/api/live${qs}`, {
       signal: ctrl.signal,
       headers: odptKey.trim() ? { "x-odpt-key": odptKey.trim() } : undefined,
     });
     const data = (await res.json()) as LivePayload;
-    const trains = stampTrainsDia(liveToTrains(lines, data.trains ?? []), data.dia ?? []);
+    const dia = data.dia ?? [];
+    officialDia = dia;
+    const trains = stampTrainsDia(liveToTrains(lines, data.trains ?? []), dia).filter((t) =>
+      mode === "flights" ? t.kind === "flight" : true,
+    );
     if (!data.ok) {
-      return { trains, source: "sim", error: data.error ?? "live" };
+      return { trains, source: "sim", error: data.error ?? "live", dia };
     }
     return {
       trains,
       source: data.source === "sim" ? "sim" : data.source,
       error: null,
+      dia,
     };
   } catch {
-    return { trains: [], source: "sim", error: "timeout" };
+    return { trains: [], source: "sim", error: "timeout", dia: officialDia };
   } finally {
     window.clearTimeout(timer);
+  }
+}
+
+export async function pinLivePosition(train: Train, lines: LineRuntime[], odptKey = ""): Promise<Train> {
+  const fallback: Train = {
+    ...train,
+    gps: false,
+    posStatus: train.delayMin > 0 || (train.delaySec ?? 0) > 0 ? "dia" : "timetable",
+  };
+  try {
+    const qs = new URLSearchParams({
+      pin: "1",
+      line: train.lineName || train.lineId,
+      from: train.prevStop || "",
+      to: train.nextStop || "",
+      dest: train.dest || "",
+      lng: String(train.lng),
+      lat: String(train.lat),
+      dir: String(train.dir),
+    });
+    const res = await fetch(`/api/live?${qs}`, {
+      signal: AbortSignal.timeout(9000),
+      headers: odptKey.trim() ? { "x-odpt-key": odptKey.trim() } : undefined,
+    });
+    const data = (await res.json()) as LivePayload;
+    if (data.dia?.length) officialDia = data.dia;
+    const mapped = stampTrainsDia(liveToTrains(lines, data.trains ?? []), data.dia ?? []);
+    const hit = mapped.find((t) => t.kind !== "flight" && t.kind !== "bus") ?? mapped[0];
+    if (!hit || hit.kind === "flight") {
+      pinned = { t: fallback, at: Date.now() };
+      return fallback;
+    }
+    const line = lines.find((l) => l.id === train.lineId) ?? lines.find((l) => l.id === hit.lineId);
+    const delayMin = Math.max(train.delayMin, hit.delayMin);
+    const delaySec = Math.max(train.delaySec ?? 0, hit.delaySec ?? 0, delayMin * 60);
+    let gps = hit.gps === true;
+    let lng = hit.lng;
+    let lat = hit.lat;
+    let bearing = hit.bearing;
+    if (gps && line) {
+      const km = railDriftKm(line, hit.lng, hit.lat);
+      const max = train.kind === "shinkansen" ? 2.5 : 0.8;
+      if (km > max) {
+        gps = false;
+        lng = train.lng;
+        lat = train.lat;
+        bearing = train.bearing;
+      }
+    }
+    const next: Train = {
+      ...train,
+      lng,
+      lat,
+      bearing,
+      delayMin,
+      delaySec,
+      delayAlert: Boolean(train.delayAlert || hit.delayAlert || delayMin > 0),
+      gps,
+      posStatus: gps ? "live" : delayMin > 0 ? "dia" : "timetable",
+      dest: hit.dest || train.dest,
+      etaMin: hit.etaMin ?? train.etaMin,
+    };
+    pinned = { t: next, at: Date.now() };
+    return next;
+  } catch {
+    pinned = { t: fallback, at: Date.now() };
+    return fallback;
   }
 }
 
@@ -44,15 +139,21 @@ export function startLivePoll(
   let lastGood: Train[] = [];
   const pull = async () => {
     const lines = getLines();
-    if (!lines.length || cancelled) return;
-    const result = await fetchLive(lines, getKey());
     if (cancelled) return;
-    if (result.trains.length) {
-      lastGood = result.trains;
-      onTick({ ...result, stale: false });
+    const result = await fetchLive(lines, getKey(), "flights");
+    if (cancelled) return;
+    const flights = result.trains.filter((t) => t.kind === "flight");
+    if (flights.length) {
+      lastGood = flights;
+      onTick({ trains: flights, source: result.source, error: result.error, stale: false });
       return;
     }
-    onTick({ trains: lastGood, source: lastGood.length ? result.source : "sim", error: result.error, stale: true });
+    onTick({
+      trains: lastGood,
+      source: lastGood.length ? result.source : "sim",
+      error: result.error,
+      stale: true,
+    });
   };
   void pull();
   const id = window.setInterval(pull, INTERVAL_MS);

@@ -101,15 +101,98 @@ function mergeRows(parts: LiveTrainJson[][]) {
   return out;
 }
 
+function railish(a: string, b: string) {
+  const x = a.replace(/[　\s線駅JR]/gu, "");
+  const y = b.replace(/[　\s線駅JR]/gu, "");
+  if (!x || !y || x.length < 2 || y.length < 2) return false;
+  return x === y || x.includes(y) || y.includes(x);
+}
+
+function pickPin(
+  rows: LiveTrainJson[],
+  line: string,
+  from: string,
+  to: string,
+  dest: string,
+  lng: number,
+  lat: number,
+): LiveTrainJson | null {
+  let best: LiveTrainJson | null = null;
+  let bestScore = 0;
+  for (const row of rows) {
+    if (row.kind === "flight" || row.kind === "bus") continue;
+    let score = 0;
+    const title = row.railwayTitle || row.railway || "";
+    if (line && railish(title, line)) score += 6;
+    if (from && railish(row.from || "", from)) score += 4;
+    if (to && railish(row.to || "", to)) score += 4;
+    if (dest && railish(row.dest || "", dest)) score += 2;
+    if (lng && lat && row.lng != null && row.lat != null) {
+      const d = Math.hypot((row.lng - lng) * 91, (row.lat - lat) * 111);
+      if (d <= 2.4) score += 10 - d * 2;
+      else if (d > 12) continue;
+    }
+    if (score > bestScore) {
+      bestScore = score;
+      best = row;
+    }
+  }
+  return bestScore >= 6 ? best : null;
+}
+
 export const Route = createFileRoute("/api/live")({
   server: {
     handlers: {
       GET: async ({ request }) => {
+        const url = new URL(request.url);
+        const flightsOnly = url.searchParams.get("flights") === "1";
+        const pin = url.searchParams.get("pin") === "1";
         const key = odptKeyFrom(request);
         const now = Date.now();
         const flightsP = skyFlights();
-        const gtfsP = gtfsRt(key);
         const diaP = fetchYahooDiaInfo().catch(() => []);
+        if (flightsOnly) {
+          const [flights, dia] = await Promise.all([flightsP, diaP]);
+          return Response.json({
+            ok: flights.length > 0,
+            source: flights.length ? "live" : "sim",
+            trains: flights,
+            dia,
+          } satisfies LivePayload);
+        }
+        const gtfsP = gtfsRt(key);
+        if (pin) {
+          const line = (url.searchParams.get("line") ?? "").trim();
+          const from = (url.searchParams.get("from") ?? "").trim();
+          const to = (url.searchParams.get("to") ?? "").trim();
+          const dest = (url.searchParams.get("dest") ?? "").trim();
+          const lng = Number(url.searchParams.get("lng") ?? 0);
+          const lat = Number(url.searchParams.get("lat") ?? 0);
+          const rows: LiveTrainJson[] = [];
+          try {
+            const cacheId = request.headers.get("x-odpt-key")?.trim() ? `u:${key.slice(0, 8)}` : "shared";
+            const hit = key ? cache.get(cacheId) : undefined;
+            if (hit?.trains.length) rows.push(...hit.trains);
+            else if (key) {
+              const [trainChunks] = await Promise.all([
+                Promise.all(OPERATORS.map((op) => odpt("odpt:Train", key, `&odpt:operator=${op}`).catch(() => []))),
+              ]);
+              const parsed = parseOdptCatalog(trainChunks.flat(), (hit?.stations ?? []) as Array<Record<string, unknown>>, (hit?.railways ?? []) as Array<Record<string, unknown>>);
+              rows.push(...parsed);
+            }
+          } catch {
+            /* fall through */
+          }
+          const [gtfs, dia] = await Promise.all([gtfsP, diaP]);
+          rows.push(...gtfs);
+          const picked = pickPin(rows, line, from, to, dest, lng, lat);
+          return Response.json({
+            ok: Boolean(picked),
+            source: picked ? "live" : "sim",
+            trains: picked ? [picked] : [],
+            dia,
+          } satisfies LivePayload);
+        }
         if (!key) {
           const [flights, gtfs, dia] = await Promise.all([flightsP, gtfsP, diaP]);
           const trains = mergeRows([gtfs, flights]);

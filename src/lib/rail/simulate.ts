@@ -333,6 +333,31 @@ export function parseTrainId(id: string): { lineId: string; dir: 0 | 1; i: numbe
   return { lineId, dir, i };
 }
 
+/** Shift a timetable train backward along the rail by official/crowd delay minutes. */
+export function poseWithDelay(line: LineRuntime, train: Train, delayMin: number, now: Date): Train {
+  const d = Math.max(0, delayMin);
+  if (d <= 0) return train;
+  const parsed = parseTrainId(train.id);
+  if (!parsed || parsed.lineId !== line.id) {
+    return { ...train, delayMin: Math.max(train.delayMin, d), delaySec: Math.max(train.delaySec ?? 0, d * 60) };
+  }
+  const { minutes, hour, weekday } = tokyoParts(now);
+  const next = makeTrain(line, minutes - d, hour, parsed.dir, parsed.i, weekday);
+  return {
+    ...next,
+    id: train.id,
+    delayMin: Math.max(train.delayMin, d),
+    delaySec: Math.max(train.delaySec ?? 0, d * 60),
+    delayAlert: Boolean(train.delayAlert) || d > 0,
+    posStatus: train.posStatus,
+    gps: train.gps,
+    fromPlatform: train.fromPlatform,
+    toPlatform: train.toPlatform,
+    boardHhmm: train.boardHhmm,
+    alightHhmm: train.alightHhmm,
+  };
+}
+
 function lerpLng(a: number, b: number, t: number) {
   let d = b - a;
   if (d > 180) d -= 360;

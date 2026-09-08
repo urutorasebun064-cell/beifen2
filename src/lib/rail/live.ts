@@ -232,6 +232,11 @@ function nearestLine(lines: LineRuntime[], lng: number, lat: number, kind?: Line
 
 const chase = new Map<string, { lng: number; lat: number; bearing: number; progress: number; at: number }>();
 
+export function railDriftKm(line: LineRuntime, lng: number, lat: number) {
+  const snap = nearestOnPath(line, lng, lat);
+  return Math.hypot((snap.coord[0] - lng) * 91, (snap.coord[1] - lat) * 111);
+}
+
 export function mergeLive(sim: Train[], live: Train[]): Train[] {
   if (!live.length) return sim;
   const now = Date.now();
@@ -272,11 +277,20 @@ export function mergeLive(sim: Train[], live: Train[]): Train[] {
       let bearing = fromBr;
       let progress = fromP;
       const shin = best.kind === "shinkansen" || lv.kind === "shinkansen";
-      if (liveGps) {
-        lng = lv.lng;
-        lat = lv.lat;
-        bearing = lv.bearing;
-        progress = lv.progress;
+      const railGap = Math.hypot((best.lng - lv.lng) * 91, (best.lat - lv.lat) * 111);
+      const maxDrift = shin ? 2.5 : 0.8;
+      if (liveGps && railGap <= maxDrift) {
+        const a = 0.38;
+        lng = fromLng + (lv.lng - fromLng) * a;
+        lat = fromLat + (lv.lat - fromLat) * a;
+        bearing = fromBr + ((((lv.bearing - fromBr + 540) % 360) - 180) * a);
+        bearing = ((bearing % 360) + 360) % 360;
+        progress = fromP + ((lv.progress || fromP) - fromP) * a;
+      } else if (liveGps) {
+        lng = best.lng;
+        lat = best.lat;
+        bearing = best.bearing;
+        progress = best.progress;
       } else if (gap <= 18) {
         if (shin) {
           lng = best.lng;

@@ -60,6 +60,7 @@ export type Train = {
   toPlatform?: string;
   boardHhmm?: string;
   alightHhmm?: string;
+  posStatus?: "live" | "dia" | "timetable" | "crowd";
 };
 
 export type StationHit = {

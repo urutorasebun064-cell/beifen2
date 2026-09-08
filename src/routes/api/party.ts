@@ -7,18 +7,55 @@ import { hanFold } from "@/lib/han";
 
 const PARTY_MAX = 5;
 const AWAY_MS = 90 * 1000;
-const MSG_MAX = 50;
+const MSG_MAX = 70;
 const MSG_DROP = 20;
+const MSG_BONUS = 300;
+const DAY_MS = 24 * 3600 * 1000;
+const LIVE_MS = 3 * DAY_MS;
+const CAP_MS = 7 * DAY_MS;
+const GONE_MS = 20 * 60 * 1000;
 const FILE = join(process.cwd(), ".data", "party-rooms.json");
 
 type Member = { id: string; nick: string; token: string; last: number; online: boolean; host?: boolean };
 type Msg = { id: number; nick: string; body: string; at: string; uid?: string };
-type Room = { name: string; pass: string; hostId: string; members: Member[]; messages: Msg[]; msgId: number };
+type Room = { name: string; pass: string; hostId: string; members: Member[]; messages: Msg[]; msgId: number; msgTotal: number; expiresAt: number };
 type Saved = Room & { key: string };
 
-type G = typeof globalThis & { __jbPartyRooms?: Map<string, Room> };
+type G = typeof globalThis & { __jbPartyRooms?: Map<string, Room>; __jbPartyGone?: Map<string, number> };
 const rooms: Map<string, Room> =
   (globalThis as G).__jbPartyRooms ?? ((globalThis as G).__jbPartyRooms = new Map<string, Room>());
+const gone: Map<string, number> =
+  (globalThis as G).__jbPartyGone ?? ((globalThis as G).__jbPartyGone = new Map<string, number>());
+
+function markGone(key: string) {
+  gone.set(key, Date.now());
+}
+
+function stillGone(key: string) {
+  const t = gone.get(key);
+  if (!t) return false;
+  if (Date.now() - t > GONE_MS) {
+    gone.delete(key);
+    return false;
+  }
+  return true;
+}
+
+function seedTtl(now = Date.now()) {
+  return now + LIVE_MS;
+}
+
+function bumpTtl(room: Room) {
+  room.msgTotal = (room.msgTotal || 0) + 1;
+  if (room.msgTotal % MSG_BONUS !== 0) return;
+  const now = Date.now();
+  const left = Math.max(0, (room.expiresAt || now) - now);
+  room.expiresAt = now + Math.min(CAP_MS, left + DAY_MS);
+}
+
+function expired(room: Room, now = Date.now()) {
+  return now >= (room.expiresAt || 0);
+}
 
 function hashPass(raw: string) {
   const s = raw.trim();
@@ -59,7 +96,7 @@ function asList<T>(raw: unknown): T[] {
 }
 
 function trimMessages(room: Room) {
-  while (room.messages.length >= MSG_MAX) room.messages.splice(0, MSG_DROP);
+  while (room.messages.length > MSG_MAX) room.messages.splice(0, MSG_DROP);
 }
 
 function asMember(raw: Partial<Member> & { uid?: string }): Member | null {
@@ -86,10 +123,13 @@ function normalizeRoom(row: Partial<Room> & { name: string }): Room {
     members,
     messages: Array.isArray(row.messages) ? row.messages.slice() : [],
     msgId: Number(row.msgId) || 1,
+    msgTotal: Math.max(0, Number(row.msgTotal) || 0),
+    expiresAt: Number((row as Room).expiresAt) || seedTtl(),
   };
 }
 
 function mergeRoom(key: string, incoming: Room) {
+  if (stillGone(key)) return rooms.get(key) ?? incoming;
   const next = normalizeRoom(incoming);
   const cur = rooms.get(key);
   if (!cur) {
@@ -99,8 +139,10 @@ function mergeRoom(key: string, incoming: Room) {
   }
   if (next.messages.length > cur.messages.length) cur.messages = next.messages.slice(-MSG_MAX);
   if (next.msgId > cur.msgId) cur.msgId = next.msgId;
+  if ((next.msgTotal || 0) > (cur.msgTotal || 0)) cur.msgTotal = next.msgTotal;
   if (next.pass && !cur.pass) cur.pass = next.pass;
   if (next.hostId && !cur.hostId) cur.hostId = next.hostId;
+  if (next.expiresAt && next.expiresAt > (cur.expiresAt || 0)) cur.expiresAt = next.expiresAt;
   for (const m of next.members) {
     const have = cur.members.find((x) => x.id === m.id || (m.token && x.token === m.token) || (m.nick && x.nick === m.nick && x.online));
     if (have) {
@@ -126,7 +168,7 @@ function hydrateFile() {
     if (!Array.isArray(rows)) return;
     for (const row of rows) {
       const key = String(row.key ?? "").trim();
-      if (!key || !row.name) continue;
+      if (!key || !row.name || stillGone(key)) continue;
       mergeRoom(key, normalizeRoom(row));
     }
   } catch {
@@ -161,16 +203,19 @@ function flushFileSoon() {
 async function writeSql(key: string, room: Room) {
   const sql = await ensureTable();
   await sql.query(
-    `insert into party_rooms (key, name, pass, members, messages, msg_id, updated_at)
-     values ($1, $2, $3, $4, $5, $6, now())
+    `insert into party_rooms (key, name, pass, members, messages, msg_id, msg_total, host_id, expires_at, updated_at)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, to_timestamp($9 / 1000.0), now())
      on conflict (key) do update set
        name = excluded.name,
        pass = excluded.pass,
        members = excluded.members,
        messages = excluded.messages,
        msg_id = excluded.msg_id,
+       msg_total = excluded.msg_total,
+       host_id = excluded.host_id,
+       expires_at = excluded.expires_at,
        updated_at = now()`,
-    [key, room.name, room.pass, JSON.stringify(room.members), JSON.stringify(room.messages), room.msgId],
+    [key, room.name, room.pass, JSON.stringify(room.members), JSON.stringify(room.messages), room.msgId, room.msgTotal || 0, room.hostId, room.expiresAt],
   );
 }
 
@@ -221,8 +266,26 @@ async function ensureTable() {
     members text not null default '[]',
     messages text not null default '[]',
     msg_id integer not null default 1,
+    msg_total integer not null default 0,
+    host_id text not null default '',
+    expires_at timestamptz,
     updated_at timestamptz not null default now()
   )`);
+  try {
+    await sql.query("alter table party_rooms add column if not exists host_id text not null default ''");
+  } catch {
+    /* */
+  }
+  try {
+    await sql.query("alter table party_rooms add column if not exists expires_at timestamptz");
+  } catch {
+    /* */
+  }
+  try {
+    await sql.query("alter table party_rooms add column if not exists msg_total integer not null default 0");
+  } catch {
+    /* */
+  }
   return sql;
 }
 
@@ -237,10 +300,23 @@ async function hydrateSql() {
         members: string;
         messages: string;
         msg_id: number;
-      }>("select key, name, pass, members, messages, msg_id from party_rooms");
+        msg_total?: number;
+        host_id?: string;
+        expires_at?: string | Date | null;
+      }>("select key, name, pass, members, messages, msg_id, msg_total, host_id, expires_at from party_rooms");
       for (const row of rows) {
         const key = String(row.key ?? "").trim();
-        if (!key) continue;
+        if (!key || stillGone(key)) continue;
+        const exp = row.expires_at ? new Date(row.expires_at).getTime() : seedTtl();
+        if (Number.isFinite(exp) && exp <= Date.now()) {
+          markGone(key);
+          try {
+            await sql.query("delete from party_rooms where key = $1", [key]);
+          } catch {
+            /* */
+          }
+          continue;
+        }
         mergeRoom(
           key,
           normalizeRoom({
@@ -249,7 +325,9 @@ async function hydrateSql() {
             members: asList<Member>(row.members),
             messages: asList<Msg>(row.messages),
             msgId: Number(row.msg_id) || 1,
-            hostId: "",
+            msgTotal: Number(row.msg_total) || 0,
+            hostId: String(row.host_id ?? ""),
+            expiresAt: Number.isFinite(exp) ? exp : seedTtl(),
           }),
         );
       }
@@ -264,6 +342,7 @@ async function hydrateSql() {
 }
 
 async function dropRoom(key: string) {
+  markGone(key);
   rooms.delete(key);
   flushFile();
   try {
@@ -274,20 +353,42 @@ async function dropRoom(key: string) {
   }
 }
 
+async function purgeExpired() {
+  const now = Date.now();
+  for (const [k, r] of [...rooms.entries()]) {
+    if (!r.expiresAt) r.expiresAt = seedTtl(now);
+    if (expired(r, now) || stillGone(k)) await dropRoom(k);
+  }
+}
+
 async function getRoom(key: string) {
+  if (stillGone(key)) return null;
   hydrateFile();
   await hydrateSql();
-  if (rooms.has(key)) return rooms.get(key) ?? null;
+  await purgeExpired();
+  if (stillGone(key)) return null;
+  if (rooms.has(key)) {
+    const r = rooms.get(key) ?? null;
+    if (r && expired(r)) {
+      await dropRoom(key);
+      return null;
+    }
+    return r;
+  }
   for (const [k, r] of rooms) {
+    if (stillGone(k) || expired(r)) continue;
     if (sameRoom(k, key) || sameRoom(r.name, key)) return r;
   }
   return null;
 }
 
 function pickRoom(key: string, raw: string) {
+  if (stillGone(key)) return { key, room: null as Room | null };
   const exact = rooms.get(key);
-  if (exact) return { key, room: exact };
-  const hits = [...rooms.entries()].filter(([k, r]) => sameRoom(k, key) || sameRoom(r.name, raw) || sameRoom(r.name, key));
+  if (exact && !expired(exact) && !stillGone(key)) return { key, room: exact };
+  const hits = [...rooms.entries()].filter(
+    ([k, r]) => !stillGone(k) && !expired(r) && (sameRoom(k, key) || sameRoom(r.name, raw) || sameRoom(r.name, key)),
+  );
   if (hits.length >= 1) {
     const best = hits.find(([k]) => k === key) ?? hits[0];
     return { key: best[0], room: best[1] };
@@ -357,6 +458,7 @@ function publicOf(room: Room, touchId?: string, was = "") {
     })),
     messages: room.messages.slice(-MSG_MAX),
     seats: PARTY_MAX,
+    expiresAt: room.expiresAt,
   };
 }
 
@@ -422,7 +524,7 @@ function takeSeat(room: Room, nick: string, token: string, uid: string, was = ""
     if (nick) have.nick = nick;
     if (token) have.token = token;
     if (uid) have.id = uid;
-    if (wasHost) {
+    if (wasHost || have.id === room.hostId || (uid && uid === room.hostId)) {
       room.hostId = have.id;
       have.host = true;
     } else {
@@ -445,7 +547,7 @@ function takeSeat(room: Room, nick: string, token: string, uid: string, was = ""
     online: true,
     host: false,
   };
-  if (!room.hostId) {
+  if (!room.hostId || (uid && uid === room.hostId)) {
     room.hostId = member.id;
     member.host = true;
   }
@@ -462,12 +564,13 @@ export const Route = createFileRoute("/api/party")({
         const url = new URL(request.url);
         if (url.searchParams.get("list") === "1") {
           hydrateFile();
-          void hydrateSql();
-          for (const [k, r] of [...rooms.entries()]) {
-            if (!r.members.length) await dropRoom(k);
-          }
+          await hydrateSql();
+          await purgeExpired();
           const q = url.searchParams.get("q") ?? "";
-          const rows = [...rooms.values()].sort((a, b) => {
+          const rows = [...rooms.entries()]
+            .filter(([k, r]) => !stillGone(k) && !expired(r))
+            .map(([, r]) => r)
+            .sort((a, b) => {
             const am = q && sameRoom(a.name, q) ? 0 : 1;
             const bm = q && sameRoom(b.name, q) ? 0 : 1;
             return am - bm;
@@ -531,22 +634,22 @@ export const Route = createFileRoute("/api/party")({
 
         if (action === "create" || action === "join") {
           if (!key || !pass) return json({ ok: false, error: "need" }, 400);
+          await purgeExpired();
+          if (action === "join" && stillGone(key)) return json({ ok: false, error: "missing" }, 404);
           const found = await lookup(key, name);
           let room = found.room;
           let roomKey = found.key;
           if (action === "create") {
-            if (room) {
-              markAway(room);
-              if (room.members.length) return json({ ok: false, error: "exists" }, 409);
-              await dropRoom(found.key);
-            }
-            const clash = rooms.get(key) ?? [...rooms.values()].find((r) => keyOf(r.name) === key);
-            if (clash && clash.members.length) return json({ ok: false, error: "exists" }, 409);
-            room = { name, pass: hashPass(pass), hostId: "", members: [], messages: [], msgId: 1 };
+            if (room && !expired(room) && !stillGone(found.key)) return json({ ok: false, error: "exists" }, 409);
+            if (room) await dropRoom(found.key);
+            const clash = [...rooms.entries()].find(([k, r]) => !stillGone(k) && !expired(r) && (k === key || keyOf(r.name) === key));
+            if (clash) return json({ ok: false, error: "exists" }, 409);
+            gone.delete(key);
+            room = { name, pass: hashPass(pass), hostId: "", members: [], messages: [], msgId: 1, msgTotal: 0, expiresAt: seedTtl() };
             roomKey = key;
             rooms.set(key, room);
           } else {
-            if (!room) return json({ ok: false, error: "missing" }, 404);
+            if (!room || expired(room) || stillGone(found.key)) return json({ ok: false, error: "missing" }, 404);
             markAway(room);
             if (!passOk(room.pass, pass)) return json({ ok: false, error: "pass" }, 403);
             if (room.pass !== hashPass(pass)) room.pass = hashPass(pass);
@@ -566,21 +669,16 @@ export const Route = createFileRoute("/api/party")({
         }
 
         if (!key || (!token && !uid)) return json({ ok: false, error: "auth" }, 403);
+        await purgeExpired();
+        if (stillGone(key)) return json({ ok: false, error: "missing" }, 404);
         const found = await lookup(key, name);
         const room = found.room;
-        if (!room) return json({ ok: false, error: "missing" }, 404);
+        if (!room || expired(room) || stillGone(found.key)) return json({ ok: false, error: "missing" }, 404);
         const me = findMember(room, token, uid);
         if (!me) return json({ ok: false, error: "auth" }, 403);
 
         if (action === "leave") {
           room.members = room.members.filter((m) => m.id !== me.id && m.token !== me.token);
-          if (!room.members.length) {
-            await dropRoom(found.key);
-            return json({ ok: true, gone: true });
-          }
-          if (!room.members.some((m) => m.id === room.hostId)) {
-            room.hostId = room.members[0]!.id;
-          }
           for (const m of room.members) m.host = m.id === room.hostId;
           await saveRoom(found.key, room);
           return json({ ok: true });
@@ -607,6 +705,7 @@ export const Route = createFileRoute("/api/party")({
             uid: me.id,
           });
           trimMessages(room);
+          bumpTtl(room);
           await saveRoom(found.key, room);
           return json({ ok: true, ...publicOf(room, me.id, was), you: me.nick, youId: me.id, host: me.id === room.hostId });
         }
@@ -614,7 +713,7 @@ export const Route = createFileRoute("/api/party")({
           if (me.id !== room.hostId) return json({ ok: false, error: "host" }, 403);
           room.messages = [];
           await saveRoom(found.key, room);
-          return json({ ok: true, ...publicOf(room, me.id, was), you: me.nick, youId: me.id, host: true });
+          return json({ ok: true, ...publicOf(room, me.id, was), you: me.nick, youId: me.id, host: true, expiresAt: room.expiresAt });
         }
         if (action === "sweep") {
           if (me.id !== room.hostId) return json({ ok: false, error: "host" }, 403);
@@ -625,10 +724,6 @@ export const Route = createFileRoute("/api/party")({
             room.members[0].host = true;
           }
           for (const m of room.members) m.host = m.id === room.hostId;
-          if (!room.members.length) {
-            await dropRoom(found.key);
-            return json({ ok: true, gone: true });
-          }
           await saveRoom(found.key, room);
           return json({ ok: true, ...publicOf(room, me.id, was), you: me.nick, youId: me.id, host: me.id === room.hostId });
         }

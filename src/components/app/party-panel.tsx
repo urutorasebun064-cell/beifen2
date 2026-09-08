@@ -8,7 +8,7 @@ import { useMapStore } from "@/store/map-store";
 
 type Member = { id: string; nick: string; online?: boolean; host?: boolean };
 type Msg = { id: number; nick: string; body: string; at: string; uid?: string };
-type RoomState = { name: string; members: Member[]; messages: Msg[]; seats: number; you?: string; youId?: string; host?: boolean; hostId?: string };
+type RoomState = { name: string; members: Member[]; messages: Msg[]; seats: number; you?: string; youId?: string; host?: boolean; hostId?: string; expiresAt?: number };
 
 function foldMembers(list: Member[], meId: string, you: string) {
   const me = you.trim();
@@ -329,6 +329,7 @@ export function PartyWindow() {
           setPending([]);
           setRoom("");
           setPass("");
+          setErr(t.partyMissing);
           return;
         }
         await resume();
@@ -446,7 +447,17 @@ export function PartyWindow() {
           ({ res, data } = await ship(again.data.token));
         }
       }
-      if (!res.ok || !data.ok) return;
+      if (!res.ok || !data.ok) {
+        if (data.error === "missing") {
+          clearSession();
+          setJoined("");
+          setToken("");
+          setState(null);
+          setPending([]);
+          setErr(t.partyMissing);
+        }
+        return;
+      }
       setState(data);
       setPending((rows) => rows.filter((p) => p.id !== local.id));
     } catch {
@@ -520,6 +531,16 @@ export function PartyWindow() {
             {joined ? (
               <span className="truncate">
                 {t.partyParty} · {joined}
+                {state?.expiresAt ? (
+                  <span className="ml-2 font-normal text-fg-muted">
+                    {(() => {
+                      const left = Math.max(0, state.expiresAt - Date.now());
+                      const days = Math.floor(left / 86400000);
+                      const hours = Math.max(1, Math.ceil(left / 3600000));
+                      return days >= 1 ? t.partyTtlD.replace("{n}", String(days)) : t.partyTtlH.replace("{n}", String(hours));
+                    })()}
+                  </span>
+                ) : null}
               </span>
             ) : (
               t.partyMenu
@@ -596,9 +617,14 @@ export function PartyWindow() {
               </div>
               {err ? <p className="text-xs text-fg">{err}</p> : null}
               {isHost ? (
-                <button type="button" className="self-start text-xs text-fg-muted" onClick={() => void hostAct("clear")}>
-                  {t.partyClear}
-                </button>
+                <div className="flex gap-3">
+                  <button type="button" className="self-start text-xs text-fg-muted" onClick={() => void hostAct("clear")}>
+                    {t.partyClear}
+                  </button>
+                  <button type="button" className="self-start text-xs text-fg-muted" onClick={() => void hostAct("disband")}>
+                    {t.partyDisband}
+                  </button>
+                </div>
               ) : null}
             </form>
           </>

@@ -92,6 +92,8 @@ type MapStore = {
   setPartyCollapsed: (on: boolean) => void;
   partyInRoom: boolean;
   setPartyInRoom: (on: boolean) => void;
+  partyAlert: boolean;
+  setPartyAlert: (on: boolean) => void;
   partyPins: { id: string; nick: string; lng: number; lat: number; station?: string; mine?: boolean }[];
   setPartyPins: (pins: { id: string; nick: string; lng: number; lat: number; station?: string; mine?: boolean }[]) => void;
   selectedMate: { id: string; nick: string; lng: number; lat: number; station?: string } | null;
@@ -290,6 +292,8 @@ export const useMapStore = create<MapStore>((set, get) => ({
   setPartyCollapsed: (partyCollapsed) => set({ partyCollapsed }),
   partyInRoom: false,
   setPartyInRoom: (partyInRoom) => set({ partyInRoom }),
+  partyAlert: false,
+  setPartyAlert: (partyAlert) => set({ partyAlert }),
   partyPins: [],
   setPartyPins: (partyPins) => set({ partyPins }),
   selectedMate: null,

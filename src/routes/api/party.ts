@@ -149,23 +149,20 @@ function mergeRoom(key: string, incoming: Room) {
   if (next.hostId && !cur.hostId) cur.hostId = next.hostId;
   if (next.expiresAt && next.expiresAt > (cur.expiresAt || 0)) cur.expiresAt = next.expiresAt;
   for (const m of next.members) {
-    const have = cur.members.find((x) => x.id === m.id || (m.token && x.token === m.token) || (m.nick && x.nick === m.nick && x.online));
-    if (have) {
-      if ((m.last ?? 0) >= (have.last ?? 0)) {
-        have.last = m.last;
-        have.token = m.token || have.token;
-        have.nick = m.nick || have.nick;
-        have.online = m.online;
-      }
-      have.id = have.id || m.id;
-      if ((m.pinAt || 0) >= (have.pinAt || 0) && Number.isFinite(m.lng) && Number.isFinite(m.lat)) {
-        have.lng = m.lng;
-        have.lat = m.lat;
-        have.pinAt = m.pinAt;
-        if (m.near) have.near = m.near;
-      }
-    } else if (cur.members.length < PARTY_MAX) {
-      cur.members.push(m);
+    const have = cur.members.find((x) => x.id === m.id || (m.token && x.token === m.token));
+    if (!have) continue;
+    if ((m.last ?? 0) >= (have.last ?? 0)) {
+      have.last = m.last;
+      have.token = m.token || have.token;
+      have.nick = m.nick || have.nick;
+      have.online = m.online;
+    }
+    have.id = have.id || m.id;
+    if ((m.pinAt || 0) >= (have.pinAt || 0) && Number.isFinite(m.lng) && Number.isFinite(m.lat)) {
+      have.lng = m.lng;
+      have.lat = m.lat;
+      have.pinAt = m.pinAt;
+      if (m.near) have.near = m.near;
     }
   }
   collapseMembers(cur);
@@ -428,22 +425,46 @@ function markAway(room: Room) {
 
 function collapseMembers(room: Room, keepId?: string) {
   const byId = new Map<string, Member>();
+  const score = (x: Member) =>
+    (keepId && (x.id === keepId || x.token === keepId) ? 100 : 0) + (x.online ? 10 : 0) + (x.last || 0) / 1e12;
+  const put = (m: Member, key: string) => {
+    const prev = byId.get(key);
+    if (!prev) {
+      byId.set(key, m);
+      return;
+    }
+    if (score(m) >= score(prev)) {
+      if (prev.id === room.hostId) room.hostId = m.id;
+      m.token = m.token || prev.token;
+      m.nick = m.nick || prev.nick;
+      byId.set(key, m);
+    } else {
+      prev.token = prev.token || m.token;
+      prev.nick = prev.nick || m.nick;
+    }
+  };
   for (const m of room.members) {
     const id = m.id || m.token;
     if (!id) continue;
-    const prev = byId.get(id);
+    put(m, `id:${id}`);
+  }
+  const merged = [...byId.values()];
+  const byTok = new Map<string, Member>();
+  for (const m of merged) {
+    const tok = m.token || m.id;
+    if (!tok) continue;
+    const prev = byTok.get(tok);
     if (!prev) {
-      byId.set(id, m);
+      byTok.set(tok, m);
       continue;
     }
-    const score = (x: Member) =>
-      (keepId && (x.id === keepId || x.token === keepId) ? 100 : 0) + (x.online ? 10 : 0) + (x.last || 0) / 1e12;
     if (score(m) >= score(prev)) {
       if (prev.id === room.hostId) room.hostId = m.id;
-      byId.set(id, m);
+      m.token = m.token || prev.token;
+      byTok.set(tok, m);
     }
   }
-  room.members = [...byId.values()];
+  room.members = [...byTok.values()];
   for (const m of room.members) m.host = m.id === room.hostId;
 }
 
@@ -580,9 +601,6 @@ function takeSeat(room: Room, nick: string, token: string, uid: string, was = ""
     return have;
   }
   if (nickTaken(room, nick)) return "nick" as const;
-  if (room.members.length >= PARTY_MAX) {
-    room.members = room.members.filter((m) => m.id === room.hostId || (m.online && Date.now() - m.last <= AWAY_MS));
-  }
   if (room.members.length >= PARTY_MAX) return null;
   const member: Member = {
     id: uid || crypto.randomUUID(),
@@ -613,7 +631,16 @@ export const Route = createFileRoute("/api/party")({
           await purgeExpired();
           const q = url.searchParams.get("q") ?? "";
           const rows = [...rooms.entries()]
-            .filter(([k, r]) => !stillGone(k) && !expired(r))
+            .filter(([k, r]) => {
+              if (stillGone(k) || expired(r)) return false;
+              collapseMembers(r);
+              markAway(r);
+              if (!r.members.length) {
+                void dropRoom(k);
+                return false;
+              }
+              return true;
+            })
             .map(([, r]) => r)
             .sort((a, b) => {
             const am = q && sameRoom(a.name, q) ? 0 : 1;
@@ -622,14 +649,11 @@ export const Route = createFileRoute("/api/party")({
           });
           return json({
             ok: true,
-            rooms: rows.map((r) => {
-              markAway(r);
-              return {
-                name: r.name,
-                n: r.members.length,
-                seats: PARTY_MAX,
-              };
-            }),
+            rooms: rows.map((r) => ({
+              name: r.name,
+              n: r.members.length,
+              seats: PARTY_MAX,
+            })),
           });
         }
         const key = keyOf(url.searchParams.get("room") ?? "");
@@ -729,7 +753,8 @@ export const Route = createFileRoute("/api/party")({
         if (action === "leave") {
           room.members = room.members.filter((m) => m.id !== me.id && m.token !== me.token && !(uid && m.id === uid));
           for (const m of room.members) m.host = m.id === room.hostId;
-          await saveRoom(found.key, room);
+          if (!room.members.length) await dropRoom(found.key);
+          else await saveRoom(found.key, room);
           return json({ ok: true });
         }
         me.last = Date.now();

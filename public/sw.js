@@ -1,5 +1,5 @@
 /* J PWA — never hijack page opens. Old interceptors caused a black screen. */
-const SW_VER = "j-v10";
+const SW_VER = "j-v11";
 
 self.addEventListener("install", () => {
   self.skipWaiting();
@@ -27,4 +27,18 @@ self.addEventListener("fetch", (event) => {
   if (url.origin !== self.location.origin) return;
   if (url.pathname.startsWith("/api/")) return;
   event.respondWith(fetch(req));
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  event.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((list) => {
+      const hit = list.find((c) => "focus" in c) ?? list[0];
+      if (hit) {
+        hit.postMessage({ type: "party-open" });
+        return hit.focus();
+      }
+      return self.clients.openWindow("/");
+    }),
+  );
 });

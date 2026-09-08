@@ -36,7 +36,6 @@ function foldMembers(list: Member[], meId: string, you: string) {
   const renamed = Boolean(me && !["ゲスト", "旅人", "Traveler"].includes(me));
   return [...best.values()].filter((m) => {
     if (m.id === meId || (m.nick || "").trim() === me) return true;
-    if (m.online === false) return false;
     const nick = (m.nick || "").trim();
     const away = m.online !== true;
     if (away && aliases.has(nick)) return false;
@@ -204,22 +203,84 @@ async function partyPost(body: Record<string, string>) {
   return { res, data };
 }
 
+let audioCtx: AudioContext | null = null;
+function unlockPing() {
+  try {
+    audioCtx ??= new AudioContext();
+    void audioCtx.resume();
+  } catch {
+    /* */
+  }
+}
+
+function pingChat() {
+  try {
+    audioCtx ??= new AudioContext();
+    void audioCtx.resume();
+    const o = audioCtx.createOscillator();
+    const g = audioCtx.createGain();
+    o.type = "triangle";
+    o.frequency.value = 880;
+    g.gain.value = 0.09;
+    o.connect(g);
+    g.connect(audioCtx.destination);
+    o.start();
+    o.stop(audioCtx.currentTime + 0.16);
+  } catch {
+    /* */
+  }
+}
+
+function clearPartyBadge() {
+  useMapStore.getState().setPartyAlert(false);
+  try {
+    void navigator.clearAppBadge?.();
+  } catch {
+    /* */
+  }
+}
+
+async function partyNotify(title: string, body: string) {
+  useMapStore.getState().setPartyAlert(true);
+  pingChat();
+  try {
+    void navigator.setAppBadge?.(1);
+  } catch {
+    /* */
+  }
+  try {
+    if (!("Notification" in window)) return;
+    if (Notification.permission === "default") await Notification.requestPermission();
+    if (Notification.permission !== "granted") return;
+    const reg = await navigator.serviceWorker?.ready.catch(() => undefined);
+    if (reg?.showNotification) {
+      await reg.showNotification(title, { body, tag: "jb-party", icon: "/icon-192.png", badge: "/icon-192.png" });
+    } else {
+      new Notification(title, { body, tag: "jb-party", icon: "/icon-192.png" });
+    }
+  } catch {
+    /* */
+  }
+}
+
 export function PartyButton() {
   const lang = useMapStore((s) => s.lang);
   const t = copies[lang];
   const open = useMapStore((s) => s.partyMenuOpen);
   const inRoom = useMapStore((s) => s.partyInRoom);
   const collapsed = useMapStore((s) => s.partyCollapsed);
+  const alert = useMapStore((s) => s.partyAlert);
   return (
     <button
       type="button"
-      className={`inline-flex min-h-36 w-11 items-center justify-center rounded-[var(--radius-md)] bg-surface/94 py-3 text-xs font-medium shadow-[var(--shadow-border)] backdrop-blur-md [writing-mode:vertical-rl] ${open || inRoom ? "text-accent" : "text-fg"} ${lang === "zh" ? "tracking-normal" : "tracking-[0.18em]"}`}
+      className={`relative inline-flex min-h-36 w-11 items-center justify-center rounded-[var(--radius-md)] bg-surface/94 py-3 text-xs font-medium shadow-[var(--shadow-border)] backdrop-blur-md [writing-mode:vertical-rl] ${open || inRoom ? "text-accent" : "text-fg"} ${lang === "zh" ? "tracking-normal" : "tracking-[0.18em]"}`}
       onClick={() => {
         const s = useMapStore.getState();
         if (s.partyInRoom) {
           if (s.partyCollapsed || !s.partyMenuOpen) {
             s.setPartyCollapsed(false);
             s.setPartyMenuOpen(true);
+            clearPartyBadge();
           } else {
             s.setPartyCollapsed(true);
           }
@@ -229,6 +290,9 @@ export function PartyButton() {
       }}
     >
       {inRoom ? t.partyParty : t.partyMenu}
+      {alert ? (
+        <span className="absolute right-0.5 top-1.5 [writing-mode:horizontal-tb] text-[13px] font-black leading-none text-[#e4453a]">!</span>
+      ) : null}
     </button>
   );
 }
@@ -275,10 +339,22 @@ export function PartyWindow() {
   const nickRef = useRef(nick);
   const joinedRef = useRef(joined);
   const tokenRef = useRef(token);
+  const lastHeardRef = useRef(0);
   passRef.current = pass;
   nickRef.current = nick;
   joinedRef.current = joined;
   tokenRef.current = token;
+
+  useEffect(() => {
+    const onMsg = (e: MessageEvent) => {
+      if (e.data?.type !== "party-open") return;
+      useMapStore.getState().setPartyMenuOpen(true);
+      useMapStore.getState().setPartyCollapsed(false);
+      clearPartyBadge();
+    };
+    navigator.serviceWorker?.addEventListener("message", onMsg);
+    return () => navigator.serviceWorker?.removeEventListener("message", onMsg);
+  }, []);
 
   useEffect(() => {
     const saved = loadSession();
@@ -393,6 +469,21 @@ export function PartyWindow() {
         const data = (await res.json()) as RoomState & { ok?: boolean; error?: string };
         if (!live) return;
         if (res.ok && data.ok !== false) {
+          const mine = userId();
+          const msgs = data.messages ?? [];
+          const top = msgs.reduce((n, m) => Math.max(n, m.id || 0), 0);
+          const prev = lastHeardRef.current;
+          if (prev > 0 && top > prev) {
+            const fresh = msgs.filter((m) => (m.id || 0) > prev && m.uid !== mine && m.nick !== nickRef.current);
+            if (fresh.length) {
+              const s = useMapStore.getState();
+              if (s.partyCollapsed || !s.partyMenuOpen || document.hidden) {
+                const last = fresh[fresh.length - 1]!;
+                void partyNotify(data.name || joinedRef.current, `${last.nick}: ${last.body}`);
+              }
+            }
+          }
+          if (top) lastHeardRef.current = top;
           setState(data);
           setPending((rows) => {
             if (!(data.messages?.length)) return [];
@@ -513,6 +604,14 @@ export function PartyWindow() {
       setToken(data.token);
       setJoined(joinedName);
       setState(data);
+      lastHeardRef.current = (data.messages ?? []).reduce((n, m) => Math.max(n, m.id || 0), 0);
+      unlockPing();
+      try {
+        if ("Notification" in window && Notification.permission === "default") void Notification.requestPermission();
+      } catch {
+        /* */
+      }
+      clearPartyBadge();
       useMapStore.getState().setPartyInRoom(true);
       useMapStore.getState().setPartyCollapsed(false);
     } finally {
@@ -600,6 +699,7 @@ export function PartyWindow() {
     useMapStore.getState().setPartyCollapsed(false);
     useMapStore.getState().selectMate(null);
     useMapStore.getState().setMateWalk(false);
+    clearPartyBadge();
   };
 
   const hostAct = async (action: "clear" | "sweep" | "disband") => {
@@ -621,6 +721,7 @@ export function PartyWindow() {
       useMapStore.getState().setPartyCollapsed(false);
       useMapStore.getState().selectMate(null);
       useMapStore.getState().setMateWalk(false);
+      clearPartyBadge();
       return;
     }
     setState(data);
@@ -740,7 +841,10 @@ export function PartyWindow() {
               <button
                 type="button"
                 className="rounded-full p-1 text-fg-muted"
-                onClick={() => useMapStore.getState().setPartyCollapsed(true)}
+                onClick={() => {
+                  clearPartyBadge();
+                  useMapStore.getState().setPartyCollapsed(true);
+                }}
                 aria-label={t.panelClose}
               >
                 <ChevronDown className="size-4" />
@@ -772,7 +876,7 @@ export function PartyWindow() {
                       {m ? (
                         <span>
                           {m.nick}
-                          {mine ? ` · ${t.partyYou}` : ""}
+                          {mine ? ` · ${t.partyYou}` : m.online === false ? ` · ${t.partyOffline}` : ""}
                         </span>
                       ) : (
                         <span className="font-medium text-fg-muted">{t.partySlot}</span>

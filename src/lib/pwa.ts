@@ -43,13 +43,13 @@ export async function registerPwa() {
     ping();
   });
   try {
-    const seen = localStorage.getItem("jb-sw-v13");
+    const seen = localStorage.getItem("jb-sw-v14");
     const regs = await navigator.serviceWorker.getRegistrations();
     if (seen !== "1") {
       await Promise.all(regs.map((r) => r.unregister()));
-      localStorage.setItem("jb-sw-v13", "1");
+      localStorage.setItem("jb-sw-v14", "1");
     }
-    await navigator.serviceWorker.register("/sw.js?v=13", { scope: "/", updateViaCache: "none" });
+    await navigator.serviceWorker.register("/sw.js?v=14", { scope: "/", updateViaCache: "none" });
   } catch {
     /* ignore */
   }

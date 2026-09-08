@@ -1226,7 +1226,7 @@ function remainingJourneySegs(lines: LineRuntime[]) {
         : from;
       const hop = haversine([start.lng, start.lat], [to.lng, to.lat]);
       const shop = shopTrip && i === journey.legs.length - 1;
-      if (shop && (store.stayWalk || store.mateWalk)) continue;
+      if (shop && store.stayWalk) continue;
       if (!shop && hop > 1.8) continue;
       if (hop < 0.05) continue;
       const pts: [number, number][] = [
@@ -4146,7 +4146,10 @@ export function CanvasMap() {
             const [sx, sy] = project(mateWalkTo.lng, mateWalkTo.lat, camRef.current, w, h);
             if (Number.isFinite(sx) && Number.isFinite(sy)) {
               const m = haversine([user.lng, user.lat], [mateWalkTo.lng, mateWalkTo.lat]) * 1000;
-              if (m >= 50) drawWalkGuide(ctx, x, y, sx, sy, "#ffe08a", m);
+              const near = stationsNearPlace(useMapStore.getState().stationIndex, user.lng, user.lat, 1)[0];
+              const his = stationsNearPlace(useMapStore.getState().stationIndex, mateWalkTo.lng, mateWalkTo.lat, 1)[0];
+              const sameStop = Boolean(near && his && near.station.name === his.station.name);
+              if (m >= 50 && (sameStop || m < 1200)) drawWalkGuide(ctx, x, y, sx, sy, "#ffe08a", m);
             }
           }
         }

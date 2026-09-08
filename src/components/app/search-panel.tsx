@@ -832,7 +832,8 @@ function addStayWalks(
     extra += shopWalk.min;
     walkToDestMin = shopWalk.min;
   }
-  return { ...journey, legs, totalMinutes: journey.totalMinutes + extra, walkFromGpsMin, walkToDestMin };
+  const dest = shopWalk?.to ?? journey.dest;
+  return { ...journey, dest, legs, totalMinutes: journey.totalMinutes + extra, walkFromGpsMin, walkToDestMin };
 }
 
 export async function applyStayTrip(stay: Stay) {
@@ -909,7 +910,11 @@ export async function applyMateTrip(mate: { nick: string; lng: number; lat: numb
   s.setFollowTrainId(null);
   s.setOrigin(fromNear.station);
   s.setDest(toNear.station);
-  await applyTrip(fromNear.station, toNear.station);
+  const sameStop =
+    fromNear.station.name === toNear.station.name ||
+    haversine([fromNear.station.lng, fromNear.station.lat], [toNear.station.lng, toNear.station.lat]) < 0.25;
+  if (sameStop) useMapStore.getState().setJourneys([]);
+  else await applyTrip(fromNear.station, toNear.station);
   const gps: RouteStop = { name: "", lng: loc.lng, lat: loc.lat, prefecture: "" };
   const originStop: RouteStop = {
     name: fromNear.station.name,
@@ -926,7 +931,7 @@ export async function applyMateTrip(mate: { nick: string; lng: number; lat: numb
   const mateStop: RouteStop = { name: mate.nick, lng: mate.lng, lat: mate.lat, prefecture: "" };
   const originWalk =
     fromNear.km >= 0.08 ? { min: walkMinutes(fromNear.km), from: gps, to: originStop } : undefined;
-  const mateKm = Math.min(meetKm, haversine([toNear.station.lng, toNear.station.lat], [mate.lng, mate.lat]));
+  const mateKm = haversine([toNear.station.lng, toNear.station.lat], [mate.lng, mate.lat]);
   const shopWalk = mateKm >= 0.05 ? { min: walkMinutes(mateKm), from: destStop, to: mateStop } : undefined;
   const st = useMapStore.getState();
   const patched = st.journeys.length

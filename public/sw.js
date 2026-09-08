@@ -1,5 +1,5 @@
 /* J PWA — never hijack page opens. Old interceptors caused a black screen. */
-const SW_VER = "j-v13";
+const SW_VER = "j-v14";
 
 self.addEventListener("install", () => {
   self.skipWaiting();
@@ -31,18 +31,17 @@ self.addEventListener("push", (event) => {
     }
   }
   event.waitUntil(
-    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((list) => {
-      const focused = list.some((c) => c.visibilityState === "visible" && "focused" in c && c.focused);
-      list.forEach((c) => c.postMessage({ type: "party-alert", title: data.title, body: data.body }));
-      if (focused) return undefined;
-      return self.registration.showNotification(data.title || "パーティ", {
-        body: data.body || "",
-        tag: data.tag || "jb-party",
-        icon: "/icon-192.png",
-        badge: "/icon-192.png",
-        renotify: true,
-      });
-    }),
+    self.registration.showNotification(data.title || "パーティ", {
+      body: data.body || "",
+      tag: data.tag || `jb-party-${Date.now()}`,
+      icon: "/icon-192.png",
+      badge: "/icon-192.png",
+      renotify: true,
+    }).then(() =>
+      self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((list) => {
+        list.forEach((c) => c.postMessage({ type: "party-alert", title: data.title, body: data.body }));
+      }),
+    ),
   );
 });
 

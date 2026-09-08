@@ -73,6 +73,15 @@ function vapidPub() {
   }
 }
 
+async function vapidOut() {
+  try {
+    const k = await ensureVapid();
+    return k?.publicKey || vapidPub();
+  } catch {
+    return vapidPub();
+  }
+}
+
 async function ensureVapid() {
   const g = globalThis as GV;
   try {
@@ -115,7 +124,7 @@ async function pingPush(room: Room, exceptId: string, title: string, body: strin
   } catch {
     return;
   }
-  const payload = JSON.stringify({ title, body, tag: "jb-party" });
+  const payload = JSON.stringify({ title, body, tag: `jb-party-${Date.now()}` });
   const jobs = room.members
     .filter((m) => m.id !== exceptId && m.push?.endpoint && m.push.p256dh && m.push.auth)
     .map((m) =>
@@ -547,12 +556,12 @@ function collapseMembers(room: Room, keepId?: string) {
     if (score(m) >= score(prev)) {
       if (prev.id === room.hostId) room.hostId = m.id;
       m.token = m.token || prev.token;
-      m.nick = m.nick || prev.nick;
+      m.nick = keepId && prev.id === keepId && prev.nick ? prev.nick : m.nick || prev.nick;
       m.push = m.push || prev.push;
       byId.set(key, m);
     } else {
       prev.token = prev.token || m.token;
-      prev.nick = prev.nick || m.nick;
+      prev.nick = keepId && m.id === keepId && m.nick ? m.nick : prev.nick || m.nick;
       prev.push = prev.push || m.push;
     }
   };
@@ -652,12 +661,14 @@ function nickTaken(room: Room, nick: string, exceptId?: string) {
 
 function dropOldSelf(room: Room, keep: Member, uid: string, token: string, was: string) {
   const fold = hanFold(keep.nick || "");
+  const old = new Set(wasNicks(was).map((n) => hanFold(n)).filter(Boolean));
   room.members = room.members.filter((m) => {
     if (m === keep) return true;
     if (uid && m.id === uid) return false;
     if (token && m.token && m.token === token) return false;
     const mn = (m.nick || "").trim();
-    if (fold && (mn === keep.nick || hanFold(mn) === fold) && (!isLive(m) || (uid && m.id === uid))) return false;
+    const mf = hanFold(mn);
+    if (mf && (mf === fold || old.has(mf)) && (!isLive(m) || (uid && m.id === uid) || (token && m.token === token))) return false;
     return true;
   });
 }
@@ -685,6 +696,7 @@ function takeSeat(room: Room, nick: string, token: string, uid: string, was = ""
   markAway(room);
   const id = uid || token;
   const fold = nick ? hanFold(nick) : "";
+  const old = wasNicks(was);
   const have =
     (id ? room.members.find((m) => m.id === id) : undefined) ??
     (token ? room.members.find((m) => m.token === token) : undefined) ??
@@ -694,13 +706,21 @@ function takeSeat(room: Room, nick: string, token: string, uid: string, was = ""
           return !isLive(m) && (mn === nick || hanFold(mn) === fold);
         })
       : undefined) ??
+    (old.length
+      ? room.members.find((m) => {
+          if (isLive(m) && m.id !== uid && m.token !== token) return false;
+          const mn = (m.nick || "").trim();
+          const mf = hanFold(mn);
+          return old.some((w) => w === mn || hanFold(w) === mf);
+        })
+      : undefined) ??
     null;
   if (have) {
     if (nick && nickTaken(room, nick, have.id)) return "nick" as const;
     const wasHost = have.id === room.hostId || Boolean(have.host);
     have.last = Date.now();
     have.online = true;
-    if (nick) have.nick = nick;
+    if (!have.nick && nick) have.nick = nick;
     if (token) have.token = token;
     if (uid) have.id = uid;
     if (wasHost || have.id === room.hostId || (uid && uid === room.hostId)) {
@@ -785,7 +805,7 @@ export const Route = createFileRoute("/api/party")({
         dropOldSelf(room, me, uid, token, wasQ);
         collapseMembers(room, me.id);
         if (room.members.length !== n0) void saveRoom(key, room);
-        return json({ ok: true, vapid: vapidPub(), ...publicOf(room, me.id, wasQ), you: me.nick, youId: me.id, host: me.id === room.hostId });
+        return json({ ok: true, vapid: await vapidOut(), ...publicOf(room, me.id, wasQ), you: me.nick, youId: me.id, host: me.id === room.hostId });
       },
       POST: async ({ request }) => {
         let body: {
@@ -849,7 +869,7 @@ export const Route = createFileRoute("/api/party")({
           await saveRoom(roomKey, room);
           return json({
             ok: true,
-            vapid: vapidPub(),
+            vapid: await vapidOut(),
             token: member.token,
             you: member.nick,
             youId: member.id,
@@ -876,7 +896,7 @@ export const Route = createFileRoute("/api/party")({
         }
         me.last = Date.now();
         me.online = true;
-        if (nickRaw) {
+        if (nickRaw && !me.nick) {
           if (nickTaken(room, nickRaw, me.id)) return json({ ok: false, error: "nick" }, 409);
           me.nick = nickRaw;
         }
@@ -884,7 +904,7 @@ export const Route = createFileRoute("/api/party")({
 
         if (action === "beat") {
           await saveRoom(found.key, room, false);
-          return json({ ok: true, vapid: vapidPub(), ...publicOf(room, me.id, was), you: me.nick, youId: me.id, host: me.id === room.hostId });
+          return json({ ok: true, vapid: await vapidOut(), ...publicOf(room, me.id, was), you: me.nick, youId: me.id, host: me.id === room.hostId });
         }
         if (action === "push") {
           const endpoint = String(body.endpoint ?? "").trim().slice(0, 512);
@@ -893,7 +913,7 @@ export const Route = createFileRoute("/api/party")({
           if (!endpoint.startsWith("http") || !p256dh || !auth) return json({ ok: false, error: "need" }, 400);
           me.push = { endpoint, p256dh, auth };
           await saveRoom(found.key, room);
-          return json({ ok: true, vapid: vapidPub(), ...publicOf(room, me.id, was), you: me.nick, youId: me.id, host: me.id === room.hostId });
+          return json({ ok: true, vapid: await vapidOut(), ...publicOf(room, me.id, was), you: me.nick, youId: me.id, host: me.id === room.hostId });
         }
         if (action === "send") {
           if (!text) return json({ ok: false, error: "need" }, 400);
@@ -912,7 +932,7 @@ export const Route = createFileRoute("/api/party")({
           } catch {
             /* */
           }
-          return json({ ok: true, vapid: vapidPub(), ...publicOf(room, me.id, was), you: me.nick, youId: me.id, host: me.id === room.hostId });
+          return json({ ok: true, vapid: await vapidOut(), ...publicOf(room, me.id, was), you: me.nick, youId: me.id, host: me.id === room.hostId });
         }
         if (action === "share") {
           const lng = Number(body.lng);

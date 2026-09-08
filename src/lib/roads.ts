@@ -10,6 +10,7 @@ const waiters = new Set<() => void>();
 let lastPull = "";
 const queue: Array<[number, number, number]> = [];
 let flying = 0;
+const MAX_FLY = 4;
 
 export function roadsEpoch() {
   return epoch;
@@ -58,32 +59,36 @@ const SRC = [
 ];
 
 function pump() {
-  if (flying || !queue.length) return;
-  const next = queue.shift();
-  if (!next) return;
-  flying = 1;
-  const [z, x, y] = next;
-  const key = `${z}/${x}/${y}`;
-  const trySrc = (i: number) => {
-    if (i >= SRC.length) {
-      pngs.set(key, "fail");
-      flying = 0;
-      pump();
-      return;
-    }
-    const img = new Image();
-    img.crossOrigin = "anonymous";
-    img.decoding = "async";
-    img.onload = () => {
-      pngs.set(key, img);
-      flying = 0;
-      bump();
-      pump();
+  while (flying < MAX_FLY && queue.length) {
+    const next = queue.shift();
+    if (!next) return;
+    flying += 1;
+    const [z, x, y] = next;
+    const key = `${z}/${x}/${y}`;
+    const trySrc = (i: number) => {
+      if (i >= SRC.length) {
+        pngs.set(key, "fail");
+        window.setTimeout(() => {
+          if (pngs.get(key) === "fail") pngs.delete(key);
+        }, 8000);
+        flying -= 1;
+        pump();
+        return;
+      }
+      const img = new Image();
+      img.crossOrigin = "anonymous";
+      img.decoding = "async";
+      img.onload = () => {
+        pngs.set(key, img);
+        flying -= 1;
+        bump();
+        pump();
+      };
+      img.onerror = () => trySrc(i + 1);
+      img.src = SRC[i]!(z, x, y);
     };
-    img.onerror = () => trySrc(i + 1);
-    img.src = SRC[i]!(z, x, y);
-  };
-  trySrc(0);
+    trySrc(0);
+  }
 }
 
 function requestPng(z: number, x: number, y: number) {
@@ -133,6 +138,13 @@ function tileSpan(lat: number, z: number, meters: number) {
   return Math.max(1, Math.min(3, Math.ceil(Math.max(RING_M, meters) / Math.max(80, tileM))));
 }
 
+function pngAt(z: number, x: number, y: number): { img: HTMLImageElement; z: number; x: number; y: number } | null {
+  const hit = pngs.get(`${z}/${x}/${y}`);
+  if (hit instanceof HTMLImageElement) return { img: hit, z, x, y };
+  if (z > 14) return pngAt(z - 1, x >> 1, y >> 1);
+  return null;
+}
+
 function drawPng(
   g: CanvasRenderingContext2D,
   cam: { lng: number; lat: number; zoom: number },
@@ -144,6 +156,7 @@ function drawPng(
   const tcx = lngToTile(origin.lng, z);
   const tcy = latToTile(origin.lat, z);
   const span = tileSpan(origin.lat, z, meters);
+  const alt = cam.zoom >= 15.1 ? 0 : ROAD_ALT;
   let m: DOMMatrix | null = null;
   try {
     m = g.getTransform();
@@ -152,21 +165,23 @@ function drawPng(
   }
   for (let x = tcx - span; x <= tcx + span; x++) {
     for (let y = tcy - span; y <= tcy + span; y++) {
-      const img = pngs.get(`${z}/${x}/${y}`);
-      if (!img || img === "load" || img === "fail") continue;
-      const west = tileWest(x, z);
-      const east = tileWest(x + 1, z);
-      const north = tileNorth(y, z);
-      const south = tileNorth(y + 1, z);
-      const nw = project(west, north, ROAD_ALT);
-      const ne = project(east, north, ROAD_ALT);
-      const sw = project(west, south, ROAD_ALT);
-      const se = project(east, south, ROAD_ALT);
-      if (![nw, ne, sw, se].every((p) => Number.isFinite(p[0]) && Number.isFinite(p[1]))) continue;
+      const got = pngAt(z, x, y);
+      if (!got) continue;
+      const west = tileWest(got.x, got.z);
+      const east = tileWest(got.x + 1, got.z);
+      const north = tileNorth(got.y, got.z);
+      const south = tileNorth(got.y + 1, got.z);
+      const nw = project(west, north, alt);
+      const ne = project(east, north, alt);
+      const sw = project(west, south, alt);
+      const se = project(east, south, alt);
+      const pts = [nw, ne, sw, se];
+      const finite = pts.every((p) => Number.isFinite(p[0]) && Number.isFinite(p[1]) && Math.abs(p[0]) < 8000 && Math.abs(p[1]) < 8000);
+      const img = got.img;
       const iw = img.naturalWidth || 256;
       const ih = img.naturalHeight || 256;
       g.save();
-      if (m) {
+      if (finite && m) {
         const a = (ne[0] - nw[0]) / iw;
         const b = (ne[1] - nw[1]) / iw;
         const c = (sw[0] - nw[0]) / ih;
@@ -182,10 +197,16 @@ function drawPng(
         g.drawImage(img, 0, 0);
         g.setTransform(m);
       } else {
-        const left = Math.min(nw[0], sw[0], ne[0], se[0]);
-        const top = Math.min(nw[1], ne[1], sw[1], se[1]);
-        const right = Math.max(nw[0], sw[0], ne[0], se[0]);
-        const bot = Math.max(nw[1], ne[1], sw[1], se[1]);
+        const xs = pts.map((p) => p[0]).filter((n) => Number.isFinite(n));
+        const ys = pts.map((p) => p[1]).filter((n) => Number.isFinite(n));
+        if (xs.length < 2 || ys.length < 2) {
+          g.restore();
+          continue;
+        }
+        const left = Math.min(...xs);
+        const top = Math.min(...ys);
+        const right = Math.max(...xs);
+        const bot = Math.max(...ys);
         g.drawImage(img, left, top, Math.max(8, right - left), Math.max(8, bot - top));
       }
       g.restore();

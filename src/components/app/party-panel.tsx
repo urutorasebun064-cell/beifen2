@@ -199,22 +199,33 @@ function url64(s: string) {
 }
 
 async function bindPush(room: string, token: string, vapid?: string) {
-  if (!room || !token || !vapid) return;
-  if (!("Notification" in window) || !("serviceWorker" in navigator) || !("PushManager" in window)) return;
+  if (!room || !token || !vapid) return false;
+  if (!("Notification" in window) || !("serviceWorker" in navigator) || !("PushManager" in window)) return false;
   try {
     if (Notification.permission === "default") await Notification.requestPermission();
-    if (Notification.permission !== "granted") return;
+    if (Notification.permission !== "granted") return false;
     const reg = await navigator.serviceWorker.ready;
+    const key = url64(vapid);
     let sub = await reg.pushManager.getSubscription();
-    sub ??= await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: url64(vapid) });
+    try {
+      sub ??= await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
+    } catch {
+      try {
+        await sub?.unsubscribe();
+      } catch {
+        /* */
+      }
+      sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
+    }
     const json = sub.toJSON();
     const endpoint = String(json.endpoint ?? "");
     const p256dh = String(json.keys?.p256dh ?? "");
     const auth = String(json.keys?.auth ?? "");
-    if (!endpoint || !p256dh || !auth) return;
-    await partyPost({ action: "push", room, token, nick: nickOf(), endpoint, p256dh, auth });
+    if (!endpoint || !p256dh || !auth) return false;
+    const { res } = await partyPost({ action: "push", room, token, nick: nickOf(), endpoint, p256dh, auth });
+    return res.ok;
   } catch {
-    /* */
+    return false;
   }
 }
 
@@ -451,7 +462,7 @@ export function PartyWindow() {
       setJoined(saved.room);
       setToken(saved.token);
       const last = loadLast();
-      const first = realNick(last && last.room === saved.room ? last.nick : "") || realNick(saved.nick);
+      const first = realNick(saved.nick) || realNick(last && last.room === saved.room ? last.nick : "");
       if (first) setNick(first);
       if (saved.pass) setPass(saved.pass);
       else if (last?.pass) setPass(last.pass);
@@ -552,7 +563,7 @@ export function PartyWindow() {
     const pull = async () => {
       try {
         const res = await fetch(
-          `/api/party?room=${encodeURIComponent(joinedRef.current)}&token=${encodeURIComponent(tokenRef.current)}&uid=${encodeURIComponent(userId())}&was=${encodeURIComponent(myNicks().filter((n) => n && n !== nickRef.current).join(","))}`,
+          `/api/party?room=${encodeURIComponent(joinedRef.current)}&token=${encodeURIComponent(tokenRef.current)}&uid=${encodeURIComponent(userId())}&nick=${encodeURIComponent(nickRef.current || "")}&was=${encodeURIComponent(myNicks().filter((n) => n && n !== nickRef.current).join(","))}`,
         );
         const data = (await res.json()) as RoomState & { ok?: boolean; error?: string };
         if (!live) return;
@@ -582,8 +593,9 @@ export function PartyWindow() {
           if (top) lastHeardRef.current = top;
           setState(data);
           if (data.vapid && pushBoundRef.current !== tokenRef.current) {
-            pushBoundRef.current = tokenRef.current;
-            void bindPush(roomName, tokenRef.current, data.vapid);
+            void bindPush(roomName, tokenRef.current, data.vapid).then((ok) => {
+              if (ok) pushBoundRef.current = tokenRef.current;
+            });
           }
           setPending((rows) => {
             if (!(data.messages?.length)) return [];
@@ -693,6 +705,7 @@ export function PartyWindow() {
       const roomName = room.trim();
       const last = loadLast();
       const who = realNick(last && last.room === roomName ? last.nick : "") || nick.trim();
+      nickRef.current = who;
       if (!who) {
         setErr(t.partyNeed);
         setBusy(false);
@@ -724,8 +737,9 @@ export function PartyWindow() {
         /* */
       }
       if (data.vapid) {
-        pushBoundRef.current = data.token;
-        void bindPush(joinedName, data.token, data.vapid);
+        void bindPush(joinedName, data.token, data.vapid).then((ok) => {
+          if (ok) pushBoundRef.current = data.token;
+        });
       }
       clearPartyBadge();
       useMapStore.getState().setPartyInRoom(true);
@@ -808,8 +822,6 @@ export function PartyWindow() {
     setState(null);
     setPending([]);
     useMapStore.getState().setPartyCollapsed(false);
-    const first = loadLast();
-    if (realNick(first?.nick)) setNick(first.nick);
     useMapStore.getState().setPartyPins([]);
     useMapStore.getState().setPartyInRoom(false);
     useMapStore.getState().setPartyCollapsed(false);
@@ -830,8 +842,6 @@ export function PartyWindow() {
       setState(null);
       setPending([]);
       useMapStore.getState().setPartyCollapsed(false);
-      const first = loadLast();
-      if (realNick(first?.nick)) setNick(first.nick);
       useMapStore.getState().setPartyPins([]);
       useMapStore.getState().setPartyInRoom(false);
       useMapStore.getState().setPartyCollapsed(false);

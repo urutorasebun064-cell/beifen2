@@ -64,7 +64,7 @@ function findLine(lines: LineRuntime[], railwayTitle: string, from: string, to: 
   return scored[0]?.l ?? named[0] ?? null;
 }
 
-function nearestOnPath(line: LineRuntime, lng: number, lat: number) {
+export function nearestOnPath(line: LineRuntime, lng: number, lat: number) {
   let bestI = 0;
   let best = Infinity;
   for (let i = 0; i < line.path.length; i++) {
@@ -78,7 +78,7 @@ function nearestOnPath(line: LineRuntime, lng: number, lat: number) {
   const km = line.cum[bestI] ?? 0;
   const t = line.totalKm > 0 ? km / line.totalKm : 0;
   const pose = pointAlong(line.path, line.cum, line.totalKm, t);
-  return { t, coord: pose.coord, bearing: pose.bearing };
+  return { t, coord: pose.coord, bearing: pose.bearing, km };
 }
 
 export function liveToTrains(lines: LineRuntime[], raw: LiveTrainJson[]): Train[] {

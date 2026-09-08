@@ -1,4 +1,4 @@
-import { liveToTrains, railDriftKm, type LivePayload } from "./live";
+import { liveToTrains, nearestOnPath, railDriftKm, type LivePayload } from "./live";
 import { ingestLiveTracks, sampleLiveTracks, type LiveTrack } from "./track-lerp";
 import { stampTrainsDia, type YahooDiaDelay } from "./yahoo";
 import type { LineRuntime, Train } from "./types";
@@ -99,6 +99,7 @@ export async function pinLivePosition(train: Train, lines: LineRuntime[], odptKe
     let lng = hit.lng;
     let lat = hit.lat;
     let bearing = hit.bearing;
+    let liveLate = false;
     if (gps && line) {
       const km = railDriftKm(line, hit.lng, hit.lat);
       const max = train.kind === "shinkansen" ? 2.5 : 0.8;
@@ -107,6 +108,11 @@ export async function pinLivePosition(train: Train, lines: LineRuntime[], odptKe
         lng = train.lng;
         lat = train.lat;
         bearing = train.bearing;
+      } else if (delayMin <= 0 && (train.delaySec ?? 0) <= 0 && !train.delayAlert && !hit.delayAlert) {
+        const simKm = nearestOnPath(line, train.lng, train.lat).km;
+        const gpsKm = nearestOnPath(line, lng, lat).km;
+        const lagKm = train.dir === 1 ? gpsKm - simKm : simKm - gpsKm;
+        if (lagKm > 0.7) liveLate = true;
       }
     }
     const next: Train = {
@@ -118,6 +124,7 @@ export async function pinLivePosition(train: Train, lines: LineRuntime[], odptKe
       delaySec,
       delayAlert: Boolean(train.delayAlert || hit.delayAlert || delayMin > 0),
       gps,
+      liveLate,
       posStatus: gps ? "live" : delayMin > 0 ? "dia" : "timetable",
       dest: hit.dest || train.dest,
       etaMin: hit.etaMin ?? train.etaMin,

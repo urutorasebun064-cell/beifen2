@@ -7,8 +7,7 @@ import { liveDelayOnTrain, liveDelayFor, delaySeconds, liveDelaySeconds, journey
 import { bearingDeg, compass8, formatKm, formatUntil, toHhmm, tokyoParts, arriveHhmmOf } from "@/lib/rail/geo";
 import { departuresAt, flightsNear } from "@/lib/rail/schedule";
 import { jrItemsToDepartures, jrItemsToTrains, untilFromHhmm, type JrBoardItem } from "@/lib/rail/jreast";
-import { isNightService, nearestTrainOnLine, poseWithDelay, trainById } from "@/lib/rail/simulate";
-import { addCrowdDelay, crowdDelayFor, setCrowdDelay } from "@/lib/rail/crowd-delay";
+import { isNightService, nearestTrainOnLine, trainById } from "@/lib/rail/simulate";
 import type { Departure, StationHit, Train } from "@/lib/rail/types";
 import { Button } from "@/components/ui/button";
 import { useMapStore, simNow } from "@/store/map-store";
@@ -40,24 +39,15 @@ export function FollowCard() {
   const arrLine = train && train.kind !== "flight" ? arrivalCompare(train, simNow(), t, lang) : "";
   const nextName = train ? displayName(train.nextStop || train.dest || train.prevStop, lang) : "";
   const lateLook = /晚|遅|late/i.test(arrLine);
-  const crowdMin = train && train.kind !== "flight" ? crowdDelayFor(train) : 0;
+  const officialLate = Boolean(train && (delaySeconds(train) > 0 || train.delayAlert));
   const statusText =
     !train || train.kind === "flight"
       ? ""
-      : crowdMin > 0
-        ? t.posCrowd
-        : train.posStatus === "live" || train.gps
-          ? t.posLive
-          : t.posDia;
-  const markDelay = (add: number) => {
-    if (!train || train.kind === "flight") return;
-    if (add === 0) setCrowdDelay(train, 0);
-    else addCrowdDelay(train, add);
-    const nextMin = add === 0 ? 0 : crowdDelayFor(train);
-    const line = useMapStore.getState().lines.find((l) => l.id === train.lineId);
-    const posed = line && nextMin > 0 ? poseWithDelay(line, train, nextMin, simNow()) : { ...train, delayMin: Math.max(train.delayMin, nextMin), posStatus: nextMin > 0 ? "crowd" as const : train.gps ? "live" as const : "dia" as const };
-    useMapStore.getState().selectTrain({ ...posed, posStatus: nextMin > 0 ? "crowd" : posed.posStatus, delayMin: Math.max(posed.delayMin, nextMin) });
-  };
+      : train.posStatus === "live" || train.gps
+        ? train.liveLate && !officialLate
+          ? t.posLiveLate
+          : t.posLive
+        : "";
   return (
     <section className="rounded-[var(--radius-xl)] bg-surface/96 p-3 shadow-[var(--shadow-border)] backdrop-blur-md">
       <div className="flex items-start justify-between gap-2">
@@ -135,22 +125,6 @@ export function FollowCard() {
           </Button>
         ) : null}
       </div>
-      {train && train.kind !== "flight" ? (
-        <div className="mt-2 flex flex-wrap items-center gap-1.5">
-          <span className="text-[11px] text-fg-muted">{t.delayPlus}</span>
-          <Button variant="quiet" size="sm" className="h-7 px-2 text-xs" onClick={() => markDelay(1)}>
-            +1{t.min}
-          </Button>
-          <Button variant="quiet" size="sm" className="h-7 px-2 text-xs" onClick={() => markDelay(5)}>
-            +5{t.min}
-          </Button>
-          {crowdMin > 0 ? (
-            <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => markDelay(0)}>
-              {t.delayClear}
-            </Button>
-          ) : null}
-        </div>
-      ) : null}
     </section>
   );
 }

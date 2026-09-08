@@ -716,6 +716,8 @@ function takeSeat(room: Room, nick: string, token: string, uid: string, was = ""
       : undefined) ??
     null;
   if (have) {
+    const oldNick = (have.nick || "").trim();
+    if (oldNick && nick && oldNick !== nick && hanFold(oldNick) !== hanFold(nick)) return "nickkeep" as const;
     if (nick && nickTaken(room, nick, have.id)) return "nick" as const;
     const wasHost = have.id === room.hostId || Boolean(have.host);
     have.last = Date.now();
@@ -865,6 +867,10 @@ export const Route = createFileRoute("/api/party")({
           await kickFromOthers(uid, token, roomKey);
           const member = takeSeat(room, nick, token, uid, was);
           if (member === "nick") return json({ ok: false, error: "nick" }, 409);
+          if (member === "nickkeep") {
+            const keep = room.members.find((m) => m.id === uid || m.token === token)?.nick || "";
+            return json({ ok: false, error: "nickkeep", nick: keep }, 409);
+          }
           if (!member) return json({ ok: false, error: "full" }, 409);
           await saveRoom(roomKey, room);
           return json({

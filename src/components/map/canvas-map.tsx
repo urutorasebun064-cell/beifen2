@@ -11,7 +11,6 @@ import { lineVisible, nearestTrainAt, parseTrainId, poseWithDelay, simulateTrain
 import { mergeLive } from "@/lib/rail/live";
 import { delaySeconds } from "@/lib/rail/delay";
 import { getOfficialDia, getPinnedTrain, pinLivePosition, smoothLiveOnTrack } from "@/lib/rail/realtime";
-import { crowdDelayFor } from "@/lib/rail/crowd-delay";
 import { stampTrainsDia } from "@/lib/rail/yahoo";
 import type { LiveTrack } from "@/lib/rail/track-lerp";
 import {
@@ -25,7 +24,7 @@ import {
 import type { Journey, LineRuntime, RouteLeg, StationHit, Train } from "@/lib/rail/types";
 import { Button } from "@/components/ui/button";
 import { applyMateTrip, calibrateTrain, calibrateStation, fillPickedStation, locateUser } from "@/components/app/search-panel";
-import { findLineForLeg, locateStation, sliceRailPath } from "@/lib/rail/graph";
+import { findLineForLeg, locateStation, sliceRailPath, densifyRailPath } from "@/lib/rail/graph";
 import { placeTrainOnLeg, stopIndexByName } from "@/lib/rail/timetable-snap";
 import { arrivalCompare, journeyGuide, rideHeadline } from "@/components/app/route-panel";
 import { focusStay } from "@/components/app/stay-catalog";
@@ -1196,27 +1195,7 @@ function remainingJourneySegs(lines: LineRuntime[]) {
     return segs;
   }
 
-  const destPt = { lng: journey.dest.lng, lat: journey.dest.lat };
-  if (here && Number.isFinite(destPt.lng) && haversine([here.lng, here.lat], [destPt.lng, destPt.lat]) < 0.05) {
-    segsCache = { key, segs };
-    return segs;
-  }
-
-  let currentRide = -1;
-  if (train && train.kind !== "flight") {
-    let ri = 0;
-    for (const leg of journey.legs) {
-      if (leg.kind !== "ride") continue;
-      if (lineMatchesLeg(train, leg) && sameWay(train, leg, lines)) {
-        currentRide = ri;
-        break;
-      }
-      ri += 1;
-    }
-  }
-
   const shopTrip = Boolean(journey.walkToDestMin);
-  let rideIdx = -1;
   for (let i = 0; i < journey.legs.length; i++) {
     const leg = journey.legs[i]!;
     if (leg.kind === "walk") {
@@ -1244,21 +1223,21 @@ function remainingJourneySegs(lines: LineRuntime[]) {
       });
       continue;
     }
-    rideIdx += 1;
-    if (currentRide >= 0 && rideIdx < currentRide) continue;
     const from = locateStation(leg.from.name, lines, index, leg.from);
     const to = locateStation(leg.to.name, lines, index, leg.to);
     const line = findLineForLeg(lines, index, { ...leg, from, to });
-    let pts = line ? sliceRailPath(line, from, to) : [];
-    if (pts.length < 2 && leg.path && leg.path.length > 2) pts = leg.path.slice();
-    if (shopTrip && pts.length < 2) {
+    let pts = leg.path && leg.path.length > 2 ? leg.path.slice() : [];
+    if (pts.length < 3 && line) pts = sliceRailPath(line, from, to);
+    if (pts.length < 3) {
+      const routed = densifyRailPath(from, to, lines, index, { ...leg, from, to });
+      if (routed.path.length >= 2) pts = routed.path;
+    }
+    if (pts.length < 2 && shopTrip) {
       pts = [
         [from.lng, from.lat],
         [to.lng, to.lat],
       ];
     }
-    if (pts.length < 2) continue;
-    if (currentRide >= 0 && rideIdx === currentRide && train) pts = clipFromTrain(pts, train.lng, train.lat);
     if (pts.length < 2) continue;
     segs.push({ color: line?.color || leg.color || CREAM, pts, walk: false });
   }
@@ -2882,7 +2861,7 @@ function trainCardParts(t: Train, loc: Lang, txt: Copy, journey: Journey | null,
 function cardZoomScale(zoom: number) {
   if (zoom < 9.2) return 0;
   if (zoom < 11) return (zoom - 9.2) / 1.8;
-  return Math.min(2.8, 1 + (zoom - 11) * 0.24);
+  return Math.min(2.15, 1 + (zoom - 11) * 0.16);
 }
 
 function drawTrainCard(
@@ -3609,11 +3588,9 @@ export function CanvasMap() {
           if (dia.length) sim = stampTrainsDia(sim, dia);
           sim = sim.map((t) => {
             if (t.kind === "flight" || t.kind === "bus") return t;
-            const crowd = crowdDelayFor(t);
-            const delay = Math.max(t.delayMin, crowd);
-            if (delay <= 0) return t;
+            if (t.delayMin <= 0) return t;
             const line = lineRef.current.find((l) => l.id === t.lineId);
-            return line ? poseWithDelay(line, t, delay, now) : { ...t, delayMin: delay };
+            return line ? poseWithDelay(line, t, t.delayMin, now) : t;
           });
           trainsRef.current = mergeLive(sim, live).filter((t) => t.kind !== "bus");
           const trip = useMapStore.getState().journey;
@@ -4363,6 +4340,7 @@ export function CanvasMap() {
           }
           if (s.selectedMate?.id === pin.id && s.mateWalk) return;
           s.selectMate({ id: pin.id, nick: pin.nick, lng: pin.lng, lat: pin.lat, station: pin.station });
+          s.setMateWalk(true);
           void applyMateTrip({ nick: pin.nick, lng: pin.lng, lat: pin.lat }).then((ok) => {
             if (!ok) useMapStore.getState().requestFlyTo({ lng: pin.lng, lat: pin.lat, bearing: 0, pitch: 0.55 });
           });
@@ -4516,7 +4494,13 @@ export function CanvasMap() {
           }
         }
         const s = useMapStore.getState();
-        if (s.journey || s.journeys.length || s.selectedStay || s.selectedKonbini || s.selectedMate || s.stayWalk || s.konbiniWalk || s.mateWalk) return;
+        if (s.selectedMate || s.mateWalk) {
+          s.selectMate(null);
+          s.setMateWalk(false);
+          s.clearTrip();
+          return;
+        }
+        if (s.journey || s.journeys.length || s.selectedStay || s.selectedKonbini || s.stayWalk || s.konbiniWalk) return;
         s.dismissPick();
         return;
       }
@@ -4535,7 +4519,13 @@ export function CanvasMap() {
       }
       {
         const s = useMapStore.getState();
-        if (s.journey || s.journeys.length || s.selectedStay || s.selectedKonbini || s.selectedMate || s.stayWalk || s.konbiniWalk || s.mateWalk) return;
+        if (s.selectedMate || s.mateWalk) {
+          s.selectMate(null);
+          s.setMateWalk(false);
+          s.clearTrip();
+          return;
+        }
+        if (s.journey || s.journeys.length || s.selectedStay || s.selectedKonbini || s.stayWalk || s.konbiniWalk) return;
         s.dismissPick();
       }
     };

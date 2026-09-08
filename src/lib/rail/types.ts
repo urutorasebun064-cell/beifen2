@@ -61,6 +61,7 @@ export type Train = {
   boardHhmm?: string;
   alightHhmm?: string;
   posStatus?: "live" | "dia" | "timetable" | "crowd";
+  liveLate?: boolean;
 };
 
 export type StationHit = {

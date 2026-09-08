@@ -66,6 +66,41 @@ function rememberNick(n: string) {
   }
 }
 
+function roomNickMap(): Record<string, string> {
+  try {
+    const raw = localStorage.getItem("jb-party-room-nicks");
+    const v = raw ? (JSON.parse(raw) as unknown) : {};
+    if (!v || typeof v !== "object") return {};
+    const out: Record<string, string> = {};
+    for (const [k, n] of Object.entries(v as Record<string, unknown>)) {
+      const name = String(n ?? "").trim().slice(0, 12);
+      if (k && name) out[k] = name;
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+function roomNickOf(room: string) {
+  const map = roomNickMap();
+  const key = hanFold(room.trim()) || room.trim();
+  return map[key] || map[room.trim()] || "";
+}
+
+function rememberRoomNick(room: string, nick: string) {
+  const name = nick.trim().slice(0, 12);
+  const key = hanFold(room.trim()) || room.trim();
+  if (!key || !name) return;
+  try {
+    const map = roomNickMap();
+    map[key] = name;
+    localStorage.setItem("jb-party-room-nicks", JSON.stringify(map));
+  } catch {
+    /* */
+  }
+}
+
 function userId() {
   try {
     const hit = localStorage.getItem("jb-party-uid");
@@ -238,7 +273,7 @@ async function partyPost(body: Record<string, string>) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ ...body, uid: userId(), ...(was ? { was } : {}) }),
   });
-  const data = (await res.json()) as RoomState & { ok?: boolean; error?: string; token?: string; gone?: boolean };
+  const data = (await res.json()) as RoomState & { ok?: boolean; error?: string; token?: string; gone?: boolean; nick?: string };
   return { res, data };
 }
 
@@ -682,13 +717,14 @@ export function PartyWindow() {
 
   if (!open) return null;
 
-  const fail = (code?: string) => {
+  const fail = (code?: string, keep?: string) => {
     if (code === "full") setErr(t.partyFull);
     else if (code === "pass") setErr(t.partyBadPass);
     else if (code === "missing") {
       if (!joinedRef.current) setErr(t.partyMissing);
     } else if (code === "exists") setErr(t.partyExists);
     else if (code === "nick") setErr(t.partyNickTaken);
+    else if (code === "nickkeep") setErr(t.partyNickKeep.replace("{n}", keep || roomNickOf(room.trim()) || nick.trim() || "—"));
     else if (code === "need") setErr(t.partyNeed);
     else if (code) setErr(t.reserveFail);
   };
@@ -703,8 +739,13 @@ export function PartyWindow() {
     setErr("");
     try {
       const roomName = room.trim();
-      const last = loadLast();
-      const who = realNick(last && last.room === roomName ? last.nick : "") || nick.trim();
+      const who = nick.trim();
+      const used = roomNickOf(roomName);
+      if (used && who && used !== who && hanFold(used) !== hanFold(who)) {
+        setErr(t.partyNickKeep.replace("{n}", used));
+        setBusy(false);
+        return;
+      }
       nickRef.current = who;
       if (!who) {
         setErr(t.partyNeed);
@@ -719,12 +760,14 @@ export function PartyWindow() {
         token: tokenRef.current,
       });
       if (!res.ok || !data.ok || !data.token) {
-        fail(data.error);
+        fail(data.error, data.nick);
         return;
       }
       const joinedName = data.name || roomName;
       saveSession({ room: joinedName, token: data.token, nick: who, open: true, pass: passRef.current });
       saveLast(joinedName, passRef.current, who);
+      rememberRoomNick(joinedName, who);
+      rememberNick(who);
       setNick(who);
       setToken(data.token);
       setJoined(joinedName);

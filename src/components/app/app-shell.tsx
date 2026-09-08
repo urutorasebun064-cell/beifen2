@@ -5,7 +5,7 @@ import { SearchPanel, locateUser, startTransitRefresh, mergeCalibratedLive } fro
 import { StayBar, StayBubble, StayCatalog, StayChat } from "@/components/app/stay-catalog";
 import { KonbiniBar, KonbiniBubble, KonbiniChat, KonbiniLoadingChip } from "@/components/app/konbini-panel";
 import { PeakBubble, PeakCatalog } from "@/components/app/peak-catalog";
-import { PartyButton, PartySafe, MateBar } from "@/components/app/party-panel";
+import { PartyButton, PartySafe } from "@/components/app/party-panel";
 import { BootSplash } from "@/components/app/boot-splash";
 import { QuakePanel } from "@/components/app/quake-panel";
 import { WeatherChip } from "@/components/app/weather-chip";
@@ -32,7 +32,6 @@ export function AppShell() {
   const destStation = useMapStore((s) => s.destStation);
   const selectedStay = useMapStore((s) => s.selectedStay);
   const selectedKonbini = useMapStore((s) => s.selectedKonbini);
-  const selectedMate = useMapStore((s) => s.selectedMate);
   const selectedPeak = useMapStore((s) => s.selectedPeak);
   const selectedTrain = useMapStore((s) => s.selectedTrain);
   const odptKey = useMapStore((s) => s.odptKey);
@@ -282,8 +281,6 @@ export function AppShell() {
           <KonbiniBar />
           <KonbiniChat />
         </>
-      ) : selectedMate ? (
-        <MateBar />
       ) : (
       <aside className={`pointer-events-none absolute inset-x-0 bottom-0 z-10 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] md:inset-y-0 md:top-0 md:right-auto md:w-[360px] md:p-4 md:pt-24 ${selectedTrain ? "max-md:hidden" : ""}`}>
         <div

@@ -404,7 +404,7 @@ export function fitJourneyCamera(journey: Journey, _train: Train | null) {
   useMapStore.getState().requestFlyTo({
     lng: origin.lng,
     lat: origin.lat,
-    zoom: 13.7,
+    zoom: 12.45,
     bearing: 0,
     pitch: 0.55,
     center: true,

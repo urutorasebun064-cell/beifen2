@@ -9,13 +9,6 @@ function ymdTokyo(at = new Date()) {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit", day: "2-digit" }).format(at);
 }
 
-function addMinutes(hh: number, mm: number, add: number) {
-  let t = hh * 60 + mm + add;
-  while (t < 0) t += 1440;
-  t %= 1440;
-  return { hh: Math.floor(t / 60), mm: t % 60 };
-}
-
 function yahooName(name: string, pf: string) {
   const n = name.replace(/駅$/u, "").trim();
   const p = pf.trim();
@@ -64,20 +57,6 @@ async function yahooPage(
   return journeysFromYahoo(await res.text(), origin, dest);
 }
 
-function mergeJourneys(rows: Journey[][]) {
-  const seen = new Set<string>();
-  const out: Journey[] = [];
-  for (const list of rows) {
-    for (const j of list) {
-      const id = `${j.departHhmm}|${j.arriveHhmm}|${j.transfers}|${j.legs.map((l) => l.lineName ?? l.kind).join(",")}`;
-      if (seen.has(id)) continue;
-      seen.add(id);
-      out.push(j);
-    }
-  }
-  return out;
-}
-
 export const Route = createFileRoute("/api/transit")({
   server: {
     handlers: {
@@ -107,22 +86,11 @@ export const Route = createFileRoute("/api/transit")({
         if (hit && Date.now() - hit.at < 12_000) return Response.json({ ok: true, journey: hit.journey, journeys: hit.journeys });
         const origin: RouteStop = { name: from, lng: olng, lat: olat, prefecture: opf };
         const dest: RouteStop = { name: to, lng: dlng, lat: dlat, prefecture: dpf };
-        const later = addMinutes(hh, mm, 18);
-        const later2 = addMinutes(hh, mm, 36);
         try {
           const diaP = fetchYahooDiaInfo();
           const first = await yahooPage(fromQ, toQ, y ?? "", mo ?? "", d ?? "", hh, mm, type, origin, dest);
-          let extra: Journey[][] = [];
-          if (type === "1" && first.length && hh >= 5) {
-            extra = await Promise.all([
-              yahooPage(fromQ, toQ, y ?? "", mo ?? "", d ?? "", later.hh, later.mm, type, origin, dest),
-              yahooPage(fromQ, toQ, y ?? "", mo ?? "", d ?? "", later2.hh, later2.mm, type, origin, dest),
-            ]);
-          } else if (type === "1" && hh < 5) {
-            extra = await Promise.all([yahooPage(fromQ, toQ, y ?? "", mo ?? "", d ?? "", 4, 40, type, origin, dest)]);
-          }
           const dia = await diaP.catch(() => []);
-          const journeys = mergeJourneys([first, ...extra]).map((j) => stampYahooDia(j, dia));
+          const journeys = first.map((j) => stampYahooDia(j, dia));
           cache.set(cacheId, { at: Date.now(), journey: journeys[0], journeys });
           return Response.json({ ok: true, journey: journeys[0] ?? null, journeys });
         } catch {

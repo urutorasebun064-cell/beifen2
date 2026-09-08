@@ -400,9 +400,9 @@ export async function applyTrip(origin: StationHit | { lng: number; lat: number 
     const google = journeys.filter((j) => j.source === "google" && usable(j));
     const firsts = firstTrains.filter(usable);
     let live: Journey[] = [];
-    if (yahoo.length) live = preferOfficial(yahoo);
-    else if (google.length) live = preferOfficial(google);
-    if (!live.length && firsts.length) live = preferOfficial(firsts);
+    if (yahoo.length) live = yahoo;
+    else if (google.length) live = google;
+    if (!live.length && firsts.length) live = firsts;
     if (!live.length) {
       const local = localJourneys(origin, dest);
       for (const j of liveJourneys(origin, dest)) pushJourney(local.list, local.seen, j);

@@ -33,21 +33,21 @@ type YahooFeature = {
 };
 
 function parseMinutes(s: string | undefined): number {
-  const n = Number(String(s ?? "").replace(/[^\d]/g, ""));
-  return Number.isFinite(n) && n > 0 ? n : 1;
+  const t = String(s ?? "");
+  const h = t.match(/(\d+)\s*時間/);
+  const m = t.match(/(\d+)\s*分/);
+  let n = 0;
+  if (h) n += Number(h[1]) * 60;
+  if (m) n += Number(m[1]);
+  if (!n) {
+    const d = Number(t.replace(/[^\d]/g, ""));
+    n = Number.isFinite(d) && d > 0 ? d : 0;
+  }
+  return n > 0 ? n : 1;
 }
 
 function isWalk(name: string): boolean {
   return /徒歩|歩いて|walk/i.test(name);
-}
-
-function clockSpan(dep?: string, arr?: string): number {
-  if (!dep || !arr || !/^\d{1,2}:\d{2}$/.test(dep) || !/^\d{1,2}:\d{2}$/.test(arr)) return 0;
-  const [dh, dm] = dep.split(":").map(Number);
-  const [ah, am] = arr.split(":").map(Number);
-  let minutes = (ah ?? 0) * 60 + (am ?? 0) - ((dh ?? 0) * 60 + (dm ?? 0));
-  if (minutes < 0) minutes += 24 * 60;
-  return minutes;
 }
 
 function railColor(name: string): string {
@@ -65,11 +65,7 @@ function railColor(name: string): string {
 }
 
 function stop(name: string, fallback: RouteStop): RouteStop {
-  const n = (name || "")
-    .replace(/[（(][^）)]{0,40}[）)]/gu, "")
-    .replace(/駅$/u, "")
-    .trim();
-  return { name: n || fallback.name, lng: fallback.lng, lat: fallback.lat, prefecture: fallback.prefecture };
+  return { name: name || fallback.name, lng: fallback.lng, lat: fallback.lat, prefecture: fallback.prefecture };
 }
 
 function numFrom(v: unknown): string | undefined {
@@ -238,7 +234,10 @@ function featureToJourney(feat: YahooFeature, origin: RouteStop, dest: RouteStop
     const to = stop(b.stationName || b.pointName || dest.name, dest);
     const dep = pickTime(a, "dep");
     const arr = pickTime(b, "arr") ?? pickTime(b, "dep");
-    const minutes = Math.max(1, clockSpan(dep, arr) || 1);
+    const [dh, dm] = (dep ?? "0:0").split(":").map(Number);
+    const [ah, am] = (arr ?? "0:0").split(":").map(Number);
+    let minutes = (ah ?? 0) * 60 + (am ?? 0) - ((dh ?? 0) * 60 + (dm ?? 0));
+    if (minutes <= 0) minutes += 24 * 60;
     const destName = a.destination ?? "";
     legs.push({
       kind: walk ? "walk" : "ride",
@@ -251,9 +250,9 @@ function featureToJourney(feat: YahooFeature, origin: RouteStop, dest: RouteStop
       fromPlatform: walk ? undefined : pickPlatform(a, "dep"),
       toPlatform: walk ? undefined : pickPlatform(b, "arr"),
       stops: [from, to],
-      minutes,
-      departHhmm: dep,
-      arriveHhmm: arr,
+      minutes: Math.max(1, minutes),
+      departHhmm: walk ? undefined : dep,
+      arriveHhmm: walk ? undefined : arr,
     });
   }
   if (!legs.length) return null;

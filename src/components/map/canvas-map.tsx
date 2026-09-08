@@ -2944,10 +2944,6 @@ function drawTrainCard(
   const rows: CardPart[] = [];
   for (const part of parts) {
     if (!part.text) continue;
-    if (part.tone === "head" || part.tone === "xfer") {
-      rows.push(part);
-      continue;
-    }
     const wrapped = wrapRow(part.text, fontOf(part.tone, part.text), part.extra ? titleLimit : maxW);
     wrapped.forEach((text, i) =>
       rows.push({
@@ -2969,8 +2965,16 @@ function drawTrainCard(
     }),
   );
   const rowH = (tone: string) => (tone === "head" || tone === "xfer" ? 18 : 16);
+  const extraShift = (row: CardPart) => {
+    if (!row.extra) return 0;
+    ctx.font = fontOf(row.tone, row.text);
+    const left = ctx.measureText(row.text).width;
+    ctx.font = extraFont;
+    const right = ctx.measureText(row.extra).width + 12;
+    return left + right + 22 > maxW ? 11 : 0;
+  };
   const cardW = Math.min(maxW + 24, Math.max(240, tw + 24));
-  const cardH = 12 + rows.reduce((n, row) => n + rowH(row.tone), 0);
+  const cardH = 12 + rows.reduce((n, row) => n + rowH(row.tone) + extraShift(row), 0);
   const cx0 = Math.max(6, Math.min(viewW - cardW - 6, x - cardW / 2));
   const cy0 = y + 12;
   ctx.fillStyle = "rgba(10,14,24,0.94)";
@@ -2994,14 +2998,16 @@ function drawTrainCard(
     ctx.font = fontOf(row.tone, row.text);
     ctx.textAlign = "left";
     ctx.fillText(row.text, cx0 + 10, yy);
+    let bump = 0;
     if (row.extra) {
+      bump = extraShift(row);
       ctx.font = extraFont;
       ctx.fillStyle = row.extraAlert ? DELAY_RED : "#ffffff";
       ctx.textAlign = "right";
-      ctx.fillText(row.extra, cx0 + cardW - 8, yy + 2);
+      ctx.fillText(row.extra, cx0 + cardW - 8, yy + 2 + bump);
       ctx.textAlign = "left";
     }
-    yy += rowH(row.tone);
+    yy += rowH(row.tone) + bump;
   });
   ctx.restore();
 }

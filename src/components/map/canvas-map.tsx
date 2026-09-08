@@ -1163,7 +1163,7 @@ function remainingJourneySegs(lines: LineRuntime[]) {
   const segs: { color: string; pts: [number, number][]; walk: boolean; minutes?: number; shop?: boolean }[] = [];
   const index = store.stationIndex;
   const key = journey
-    ? `j:${journey.origin.name}|${journey.dest.name}|${journey.departHhmm}|${journey.arriveHhmm}|${journey.legs.map((l) => `${l.kind}:${l.from.name}>${l.to.name}`).join(",")}|${store.stayWalk ? 1 : 0}|${lines.length}`
+    ? `j:${journey.origin.name}|${journey.dest.name}|${journey.departHhmm}|${journey.arriveHhmm}|${journey.legs.map((l) => `${l.kind}:${l.from.name}>${l.to.name}`).join(",")}|${store.stayWalk ? 1 : 0}|${store.mateWalk ? 1 : 0}|${lines.length}`
     : train && train.kind !== "flight"
       ? `t:${train.id}|${train.dest}|${train.lng.toFixed(3)}|${train.lat.toFixed(3)}|${lines.length}`
       : "";
@@ -3164,7 +3164,7 @@ export function CanvasMap() {
     ) => {
       const journey = useMapStore.getState().journey;
       const loose = Boolean(drag.current) || Boolean(camLerpRef.current);
-      const key = `${cam.lng.toFixed(loose ? 3 : 4)}|${cam.lat.toFixed(loose ? 3 : 4)}|${cam.zoom.toFixed(loose ? 2 : 3)}|${cam.yaw.toFixed(loose ? 2 : 3)}|${cam.tilt.toFixed(loose ? 2 : 3)}|${useMapStore.getState().pitchMode}|${w}|${h}|${journey?.dest.name ?? ""}|${lineRef.current.length}|${useMapStore.getState().selectedTrain?.id ?? ""}|${useMapStore.getState().selectedStation?.name ?? ""}|${useMapStore.getState().selectedStay?.id ?? ""}|${useMapStore.getState().stayLayer ? 1 : 0}|${useMapStore.getState().stayWalk ? 1 : 0}|${useMapStore.getState().selectedKonbini?.id ?? ""}|${useMapStore.getState().konbiniBrand ?? ""}|${useMapStore.getState().konbiniStores.length}|${useMapStore.getState().konbiniWalk ? 1 : 0}|${useMapStore.getState().lang}|${useMapStore.getState().radarEnabled ? 1 : 0}|${useMapStore.getState().mountainLayer ? 1 : 0}|${SLAB_FACES ? 1 : 0}`;
+      const key = `${cam.lng.toFixed(loose ? 3 : 4)}|${cam.lat.toFixed(loose ? 3 : 4)}|${cam.zoom.toFixed(loose ? 2 : 3)}|${cam.yaw.toFixed(loose ? 2 : 3)}|${cam.tilt.toFixed(loose ? 2 : 3)}|${useMapStore.getState().pitchMode}|${w}|${h}|${journey?.dest.name ?? ""}|${lineRef.current.length}|${useMapStore.getState().selectedTrain?.id ?? ""}|${useMapStore.getState().selectedStation?.name ?? ""}|${useMapStore.getState().selectedStay?.id ?? ""}|${useMapStore.getState().stayLayer ? 1 : 0}|${useMapStore.getState().stayWalk ? 1 : 0}|${useMapStore.getState().selectedKonbini?.id ?? ""}|${useMapStore.getState().konbiniBrand ?? ""}|${useMapStore.getState().konbiniStores.length}|${useMapStore.getState().konbiniWalk ? 1 : 0}|${useMapStore.getState().selectedMate?.id ?? ""}|${useMapStore.getState().mateWalk ? 1 : 0}|${useMapStore.getState().lang}|${useMapStore.getState().radarEnabled ? 1 : 0}|${useMapStore.getState().mountainLayer ? 1 : 0}|${SLAB_FACES ? 1 : 0}`;
       if (key === baseKey) return;
       baseKey = key;
       applyTransform(bg, sizeRef.current.dpr);
@@ -3925,7 +3925,7 @@ export function CanvasMap() {
           }
           const st = useMapStore.getState();
           const hideRing = Boolean(
-            (st.selectedTrain || st.journey || st.journeys.length || st.searching) && !st.konbiniWalk && !st.stayWalk,
+            (st.selectedTrain || st.journey || st.journeys.length || st.searching) && !st.konbiniWalk && !st.stayWalk && !st.mateWalk,
           );
           if (!hideRing) {
             const ringM = st.konbiniBrand ? konbiniRingM(user, st.stationIndex, st.nearestStations) : undefined;
@@ -4118,6 +4118,14 @@ export function CanvasMap() {
               drawWalkGuide(ctx, x, y, sx, sy, "#ffe08a", m);
             }
           }
+          const mateWalkTo = st.mateWalk ? st.selectedMate : null;
+          if (mateWalkTo && Number.isFinite(x) && Number.isFinite(y)) {
+            const [sx, sy] = project(mateWalkTo.lng, mateWalkTo.lat, camRef.current, w, h);
+            if (Number.isFinite(sx) && Number.isFinite(sy)) {
+              const m = haversine([user.lng, user.lat], [mateWalkTo.lng, mateWalkTo.lat]) * 1000;
+              drawWalkGuide(ctx, x, y, sx, sy, "#ffe08a", m);
+            }
+          }
         }
 
         const partyPins = useMapStore.getState().partyPins;
@@ -4296,6 +4304,19 @@ export function CanvasMap() {
         }
         return;
       }
+      for (const pin of useMapStore.getState().partyPins) {
+        if (pin.mine) continue;
+        const [x, y] = project(pin.lng, pin.lat, cam, w, h);
+        if (Math.hypot(x - sx, y - sy) < 28 || Math.hypot(x - sx, y - 18 - sy) < 22) {
+          const s = useMapStore.getState();
+          if (s.selectedMate?.id === pin.id) return;
+          s.selectMate({ id: pin.id, nick: pin.nick, lng: pin.lng, lat: pin.lat, station: pin.station });
+          s.setMateWalk(false);
+          s.setPartyCollapsed(true);
+          s.requestFlyTo({ lng: pin.lng, lat: pin.lat, zoom: 14.2, bearing: 0, pitch: 0.55, center: true });
+          return;
+        }
+      }
       for (const stay of STAYS) {
         if (!useMapStore.getState().stayLayer) break;
         const [x, y] = project(stay.lng, stay.lat, cam, w, h);
@@ -4438,7 +4459,7 @@ export function CanvasMap() {
           }
         }
         const s = useMapStore.getState();
-        if (s.journey || s.journeys.length || s.selectedStay || s.selectedKonbini || s.stayWalk || s.konbiniWalk) return;
+        if (s.journey || s.journeys.length || s.selectedStay || s.selectedKonbini || s.selectedMate || s.stayWalk || s.konbiniWalk || s.mateWalk) return;
         s.dismissPick();
         return;
       }
@@ -4457,7 +4478,7 @@ export function CanvasMap() {
       }
       {
         const s = useMapStore.getState();
-        if (s.journey || s.journeys.length || s.selectedStay || s.selectedKonbini || s.stayWalk || s.konbiniWalk) return;
+        if (s.journey || s.journeys.length || s.selectedStay || s.selectedKonbini || s.selectedMate || s.stayWalk || s.konbiniWalk || s.mateWalk) return;
         s.dismissPick();
       }
     };

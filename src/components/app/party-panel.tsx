@@ -1,8 +1,9 @@
 import { Component, FormEvent, useEffect, useRef, useState, type ReactNode } from "react";
-import { ChevronDown, ChevronUp, X } from "lucide-react";
+import { ChevronDown, Navigation, X } from "lucide-react";
 import { copies } from "@/lib/i18n";
 import { hanFold } from "@/lib/han";
 import { isInJapan, stationsNearPlace } from "@/lib/rail/geo";
+import { applyMateTrip } from "@/components/app/search-panel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useMapStore } from "@/store/map-store";
@@ -207,13 +208,27 @@ export function PartyButton() {
   const lang = useMapStore((s) => s.lang);
   const t = copies[lang];
   const open = useMapStore((s) => s.partyMenuOpen);
+  const inRoom = useMapStore((s) => s.partyInRoom);
+  const collapsed = useMapStore((s) => s.partyCollapsed);
   return (
     <button
       type="button"
-      className={`inline-flex min-h-36 w-11 items-center justify-center rounded-[var(--radius-md)] bg-surface/94 py-3 text-xs font-medium shadow-[var(--shadow-border)] backdrop-blur-md [writing-mode:vertical-rl] ${open ? "text-accent" : "text-fg"} ${lang === "zh" ? "tracking-normal" : "tracking-[0.18em]"}`}
-      onClick={() => useMapStore.getState().setPartyMenuOpen(!open)}
+      className={`inline-flex min-h-36 w-11 items-center justify-center rounded-[var(--radius-md)] bg-surface/94 py-3 text-xs font-medium shadow-[var(--shadow-border)] backdrop-blur-md [writing-mode:vertical-rl] ${open || inRoom ? "text-accent" : "text-fg"} ${lang === "zh" ? "tracking-normal" : "tracking-[0.18em]"}`}
+      onClick={() => {
+        const s = useMapStore.getState();
+        if (s.partyInRoom) {
+          if (s.partyCollapsed || !s.partyMenuOpen) {
+            s.setPartyCollapsed(false);
+            s.setPartyMenuOpen(true);
+          } else {
+            s.setPartyCollapsed(true);
+          }
+          return;
+        }
+        s.setPartyMenuOpen(!s.partyMenuOpen);
+      }}
     >
-      {t.partyMenu}
+      {inRoom ? t.partyParty : t.partyMenu}
     </button>
   );
 }
@@ -253,7 +268,7 @@ export function PartyWindow() {
   const [pending, setPending] = useState<Msg[]>([]);
   const [state, setState] = useState<RoomState | null>(null);
   const [sharing, setSharing] = useState(false);
-  const [collapsed, setCollapsed] = useState(false);
+  const collapsed = useMapStore((s) => s.partyCollapsed);
   const logRef = useRef<HTMLDivElement>(null);
   const stickRef = useRef(true);
   const passRef = useRef(pass);
@@ -269,11 +284,15 @@ export function PartyWindow() {
     const saved = loadSession();
     if (saved) {
       setRoom(saved.room);
+      setJoined(saved.room);
+      setToken(saved.token);
       const last = loadLast();
       const first = realNick(last && last.room === saved.room ? last.nick : "") || realNick(saved.nick);
       if (first) setNick(first);
       if (saved.pass) setPass(saved.pass);
       else if (last?.pass) setPass(last.pass);
+      useMapStore.getState().setPartyInRoom(true);
+      useMapStore.getState().setPartyCollapsed(true);
       return;
     }
     const last = loadLast();
@@ -310,6 +329,7 @@ export function PartyWindow() {
     setRoom(saved.room);
     if (saved.nick) setNick(saved.nick);
     if (saved.pass) setPass(saved.pass);
+    useMapStore.getState().setPartyInRoom(true);
   }, [open]);
 
   useEffect(() => {
@@ -386,6 +406,10 @@ export function PartyWindow() {
           setRoom("");
           setPass("");
           setErr(t.partyMissing);
+          useMapStore.getState().setPartyInRoom(false);
+          useMapStore.getState().setPartyCollapsed(false);
+          useMapStore.getState().setPartyPins([]);
+          useMapStore.getState().selectMate(null);
           return;
         }
         await resume();
@@ -431,7 +455,7 @@ export function PartyWindow() {
       const lng = Number(m.lng);
       const lat = Number(m.lat);
       if (!Number.isFinite(lng) || !Number.isFinite(lat) || !isInJapan(lng, lat)) return [];
-      return [{ id: m.id, nick: m.nick, lng, lat, station: m.near }];
+      return [{ id: m.id, nick: m.nick, lng, lat, station: m.near, mine: m.id === (state?.youId || "") }];
     });
     useMapStore.getState().setPartyPins(rows);
   }, [state?.members]);
@@ -484,7 +508,8 @@ export function PartyWindow() {
       setToken(data.token);
       setJoined(joinedName);
       setState(data);
-      setCollapsed(false);
+      useMapStore.getState().setPartyInRoom(true);
+      useMapStore.getState().setPartyCollapsed(false);
     } finally {
       setBusy(false);
     }
@@ -562,10 +587,14 @@ export function PartyWindow() {
     setToken("");
     setState(null);
     setPending([]);
-    setCollapsed(false);
+    useMapStore.getState().setPartyCollapsed(false);
     const first = loadLast();
     if (realNick(first?.nick)) setNick(first.nick);
     useMapStore.getState().setPartyPins([]);
+    useMapStore.getState().setPartyInRoom(false);
+    useMapStore.getState().setPartyCollapsed(false);
+    useMapStore.getState().selectMate(null);
+    useMapStore.getState().setMateWalk(false);
   };
 
   const hostAct = async (action: "clear" | "sweep" | "disband") => {
@@ -579,10 +608,14 @@ export function PartyWindow() {
       setToken("");
       setState(null);
       setPending([]);
-      setCollapsed(false);
+      useMapStore.getState().setPartyCollapsed(false);
       const first = loadLast();
       if (realNick(first?.nick)) setNick(first.nick);
       useMapStore.getState().setPartyPins([]);
+      useMapStore.getState().setPartyInRoom(false);
+      useMapStore.getState().setPartyCollapsed(false);
+      useMapStore.getState().selectMate(null);
+      useMapStore.getState().setMateWalk(false);
       return;
     }
     setState(data);
@@ -616,7 +649,7 @@ export function PartyWindow() {
             });
             if (res.ok && data.ok) {
               setState(data);
-              setCollapsed(true);
+              useMapStore.getState().setPartyCollapsed(true);
               if (isInJapan(lng, lat)) {
                 useMapStore.getState().requestFlyTo({ lng, lat, zoom: 14.2, bearing: 0, pitch: 0.55, center: true });
               }
@@ -663,33 +696,7 @@ export function PartyWindow() {
   ];
   const sharingMe = members.some((m) => m.id === meId && Number.isFinite(m.lng) && Number.isFinite(m.lat));
 
-  if (joined && collapsed) {
-    return (
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-40 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
-        <div className="pointer-events-auto rpg-frame relative mx-auto flex w-full max-w-md items-center justify-center px-3 py-2">
-          <button
-            type="button"
-            className="flex items-center justify-center py-1 text-fg-muted"
-            aria-label={t.panelOpen}
-            onClick={() => setCollapsed(false)}
-          >
-            <ChevronUp className="size-5" />
-          </button>
-          <button
-            type="button"
-            className="absolute top-1.5 right-2 rounded-full p-1.5 text-fg-muted"
-            aria-label={t.close}
-            onClick={leave}
-          >
-            <X className="size-4" />
-          </button>
-          <button type="button" className="absolute inset-x-10 truncate px-2 text-center text-sm text-fg" onClick={() => setCollapsed(false)}>
-            {t.partyParty} · {joined}
-          </button>
-        </div>
-      </div>
-    );
-  }
+  if (joined && collapsed) return null;
 
   return (
     <div className="absolute inset-0 z-40 flex items-end justify-center bg-bg/50 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] md:items-center">
@@ -719,7 +726,7 @@ export function PartyWindow() {
               <button
                 type="button"
                 className="rounded-full p-1 text-fg-muted"
-                onClick={() => setCollapsed(true)}
+                onClick={() => useMapStore.getState().setPartyCollapsed(true)}
                 aria-label={t.panelClose}
               >
                 <ChevronDown className="size-4" />
@@ -934,6 +941,56 @@ export function PartyWindow() {
           </form>
         )}
       </div>
+    </div>
+  );
+}
+
+export function MateBar() {
+  const lang = useMapStore((s) => s.lang);
+  const t = copies[lang];
+  const mate = useMapStore((s) => s.selectedMate);
+  const walking = useMapStore((s) => s.mateWalk);
+  const [routing, setRouting] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
+  useEffect(() => {
+    setRouting(false);
+    setToast(null);
+  }, [mate?.id]);
+  if (!mate) return null;
+  const goRoute = async () => {
+    setRouting(true);
+    useMapStore.getState().setMateWalk(true);
+    const ok = await applyMateTrip(mate);
+    setRouting(false);
+    if (!ok) setToast(t.noNearStation);
+  };
+  return (
+    <div className="pointer-events-none absolute inset-x-0 bottom-0 z-30 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+      <div className="pointer-events-auto relative mx-auto flex w-full max-w-md gap-2">
+        <button
+          type="button"
+          className="absolute -top-2 right-0 z-10 flex size-8 items-center justify-center rounded-full bg-surface text-fg-muted shadow-[var(--shadow-border)]"
+          aria-label={t.close}
+          onClick={() => {
+            const s = useMapStore.getState();
+            s.selectMate(null);
+            s.setMateWalk(false);
+            s.clearTrip();
+          }}
+        >
+          <X className="size-4" />
+        </button>
+        <button
+          type="button"
+          className={`inline-flex h-12 min-h-12 flex-1 items-center justify-center gap-1.5 rounded-[var(--radius-md)] px-3 text-sm font-medium shadow-[var(--shadow-border)] ${walking ? "bg-accent/15 text-accent" : "bg-surface text-fg"}`}
+          onClick={() => void goRoute()}
+          disabled={routing}
+        >
+          <Navigation className="size-4" />
+          {routing ? t.searching : t.stayGuide}
+        </button>
+      </div>
+      {toast ? <p className="pointer-events-auto mx-auto mt-2 max-w-md rounded-[var(--radius-md)] bg-surface px-3 py-2 text-center text-xs text-fg shadow-[var(--shadow-border)]">{toast}</p> : null}
     </div>
   );
 }

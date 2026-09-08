@@ -892,6 +892,61 @@ export async function applyStayTrip(stay: Stay) {
   return true;
 }
 
+export async function applyMateTrip(mate: { nick: string; lng: number; lat: number }) {
+  const s = useMapStore.getState();
+  const loc = s.userLocation ?? NODA;
+  const fromNear = stationsNearPlace(s.stationIndex, loc.lng, loc.lat, 1)[0];
+  const toNear = stationsNearPlace(s.stationIndex, mate.lng, mate.lat, 1)[0];
+  if (!fromNear || !toNear) return false;
+  s.setMateWalk(true);
+  s.selectTrain(null);
+  s.setFollowTrainId(null);
+  s.setOrigin(fromNear.station);
+  s.setDest(toNear.station);
+  await applyTrip(fromNear.station, toNear.station);
+  const gps: RouteStop = { name: "", lng: loc.lng, lat: loc.lat, prefecture: "" };
+  const originStop: RouteStop = {
+    name: fromNear.station.name,
+    lng: fromNear.station.lng,
+    lat: fromNear.station.lat,
+    prefecture: fromNear.station.prefecture,
+  };
+  const destStop: RouteStop = {
+    name: toNear.station.name,
+    lng: toNear.station.lng,
+    lat: toNear.station.lat,
+    prefecture: toNear.station.prefecture,
+  };
+  const mateStop: RouteStop = { name: mate.nick, lng: mate.lng, lat: mate.lat, prefecture: "" };
+  const originWalk =
+    fromNear.km >= 0.08 ? { min: walkMinutes(fromNear.km), from: gps, to: originStop } : undefined;
+  const mateKm = haversine([toNear.station.lng, toNear.station.lat], [mate.lng, mate.lat]);
+  const shopWalk = mateKm >= 0.05 ? { min: walkMinutes(mateKm), from: destStop, to: mateStop } : undefined;
+  const st = useMapStore.getState();
+  const patched = st.journeys.length
+    ? st.journeys.map((j) => addStayWalks(j, originWalk, shopWalk))
+    : shopWalk
+      ? [
+          addStayWalks(
+            {
+              origin: originStop,
+              dest: mateStop,
+              legs: [],
+              totalMinutes: 0,
+              transfers: 0,
+              departHhmm: "",
+              arriveHhmm: "",
+              source: "local",
+            },
+            originWalk,
+            shopWalk,
+          ),
+        ]
+      : [];
+  if (patched.length) st.setJourneys(patched, Math.min(st.journeyIndex, patched.length - 1));
+  return true;
+}
+
 function tokyoClockParams() {
   const vt = useMapStore.getState().viewTime;
   if (vt) {

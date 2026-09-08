@@ -524,6 +524,25 @@ function dropOldSelf(room: Room, keep: Member, uid: string, token: string, was: 
   });
 }
 
+async function kickFromOthers(uid: string, token: string, keepKey: string) {
+  if (!uid && !token) return;
+  hydrateFile();
+  try {
+    await hydrateSql();
+  } catch {
+    /* */
+  }
+  for (const [k, r] of [...rooms.entries()]) {
+    if (k === keepKey || stillGone(k)) continue;
+    const hit = r.members.some((m) => (uid && m.id === uid) || (token && m.token && m.token === token));
+    if (!hit) continue;
+    r.members = r.members.filter((m) => !(uid && m.id === uid) && !(token && m.token && m.token === token));
+    for (const m of r.members) m.host = m.id === r.hostId;
+    if (!r.members.length) await dropRoom(k);
+    else await saveRoom(k, r);
+  }
+}
+
 function takeSeat(room: Room, nick: string, token: string, uid: string, was = "") {
   markAway(room);
   const id = uid || token;
@@ -672,6 +691,7 @@ export const Route = createFileRoute("/api/party")({
             if (!passOk(room.pass, pass)) return json({ ok: false, error: "pass" }, 403);
             if (room.pass !== hashPass(pass)) room.pass = hashPass(pass);
           }
+          await kickFromOthers(uid, token, roomKey);
           const member = takeSeat(room, nick, token, uid, was);
           if (member === "nick") return json({ ok: false, error: "nick" }, 409);
           if (!member) return json({ ok: false, error: "full" }, 409);

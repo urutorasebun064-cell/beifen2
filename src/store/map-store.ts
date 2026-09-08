@@ -88,8 +88,16 @@ type MapStore = {
   setStayMenuOpen: (on: boolean) => void;
   partyMenuOpen: boolean;
   setPartyMenuOpen: (on: boolean) => void;
-  partyPins: { id: string; nick: string; lng: number; lat: number; station?: string }[];
-  setPartyPins: (pins: { id: string; nick: string; lng: number; lat: number; station?: string }[]) => void;
+  partyCollapsed: boolean;
+  setPartyCollapsed: (on: boolean) => void;
+  partyInRoom: boolean;
+  setPartyInRoom: (on: boolean) => void;
+  partyPins: { id: string; nick: string; lng: number; lat: number; station?: string; mine?: boolean }[];
+  setPartyPins: (pins: { id: string; nick: string; lng: number; lat: number; station?: string; mine?: boolean }[]) => void;
+  selectedMate: { id: string; nick: string; lng: number; lat: number; station?: string } | null;
+  selectMate: (mate: { id: string; nick: string; lng: number; lat: number; station?: string } | null) => void;
+  mateWalk: boolean;
+  setMateWalk: (on: boolean) => void;
   stayScreen: { x: number; y: number } | null;
   setStayScreen: (pos: { x: number; y: number } | null) => void;
   stayWalk: boolean;
@@ -278,8 +286,24 @@ export const useMapStore = create<MapStore>((set, get) => ({
   setStayMenuOpen: (stayMenuOpen) => set({ stayMenuOpen }),
   partyMenuOpen: false,
   setPartyMenuOpen: (partyMenuOpen) => set({ partyMenuOpen }),
+  partyCollapsed: false,
+  setPartyCollapsed: (partyCollapsed) => set({ partyCollapsed }),
+  partyInRoom: false,
+  setPartyInRoom: (partyInRoom) => set({ partyInRoom }),
   partyPins: [],
   setPartyPins: (partyPins) => set({ partyPins }),
+  selectedMate: null,
+  selectMate: (selectedMate) =>
+    set((s) => ({
+      selectedMate,
+      mateWalk: selectedMate ? s.mateWalk : false,
+      selectedStay: selectedMate ? null : s.selectedStay,
+      selectedKonbini: selectedMate ? null : s.selectedKonbini,
+      selectedTrain: selectedMate ? null : s.selectedTrain,
+      followTrainId: selectedMate ? null : s.followTrainId,
+    })),
+  mateWalk: false,
+  setMateWalk: (mateWalk) => set({ mateWalk }),
   stayScreen: null,
   setStayScreen: (stayScreen) => set({ stayScreen }),
   stayWalk: false,

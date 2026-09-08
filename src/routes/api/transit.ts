@@ -64,20 +64,6 @@ async function yahooPage(
   return journeysFromYahoo(await res.text(), origin, dest);
 }
 
-function clockDue(hhmm: string, nowMin: number) {
-  const [h, m] = hhmm.split(":").map(Number);
-  const t = (h ?? 0) * 60 + (m ?? 0);
-  let d = t - nowMin;
-  if (d < -90) d += 1440;
-  if (d > 1260) d -= 1440;
-  return d;
-}
-
-function rideDepart(j: Journey) {
-  const ride = j.legs.find((l) => l.kind === "ride" && l.departHhmm);
-  return ride?.departHhmm || j.departHhmm;
-}
-
 function mergeJourneys(rows: Journey[][]) {
   const seen = new Set<string>();
   const out: Journey[] = [];
@@ -89,14 +75,6 @@ function mergeJourneys(rows: Journey[][]) {
       out.push(j);
     }
   }
-  const nowMin = tokyoParts().minutes;
-  out.sort((a, b) => {
-    const da = clockDue(rideDepart(a), nowMin);
-    const db = clockDue(rideDepart(b), nowMin);
-    if (da !== db) return da - db;
-    if (a.totalMinutes !== b.totalMinutes) return a.totalMinutes - b.totalMinutes;
-    return clockDue(a.arriveHhmm, nowMin) - clockDue(b.arriveHhmm, nowMin);
-  });
   return out;
 }
 

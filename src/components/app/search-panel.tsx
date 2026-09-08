@@ -60,24 +60,20 @@ function preferOfficial(list: Journey[]) {
   }
   const keys = new Set(official.map(routeShape));
   const extra = list.filter((j) => j.source !== "yahoo" && j.source !== "google" && !keys.has(routeShape(j)));
-  sortJourneys(official);
   sortJourneys(extra);
   return official.concat(extra);
-}
-
-function rideDepart(j: Journey) {
-  const ride = j.legs.find((l) => l.kind === "ride" && l.departHhmm);
-  return ride?.departHhmm || j.departHhmm;
 }
 
 function sortJourneys(list: Journey[]) {
   const nowMin = tokyoParts(simNow()).minutes;
   list.sort((a, b) => {
-    const da = departDue(rideDepart(a), nowMin) + (a.delayMin ?? 0);
-    const db = departDue(rideDepart(b), nowMin) + (b.delayMin ?? 0);
-    if (da !== db) return da - db;
+    const aa = departDue(a.arriveHhmm, nowMin);
+    const bb = departDue(b.arriveHhmm, nowMin);
+    if (aa !== bb) return aa - bb;
     if (a.totalMinutes !== b.totalMinutes) return a.totalMinutes - b.totalMinutes;
-    return departDue(a.arriveHhmm, nowMin) - departDue(b.arriveHhmm, nowMin);
+    const da = departDue(a.departHhmm, nowMin) + (a.delayMin ?? 0);
+    const db = departDue(b.departHhmm, nowMin) + (b.delayMin ?? 0);
+    return da - db;
   });
 }
 
@@ -119,8 +115,8 @@ function isLastDepart(hhmm: string) {
 }
 
 function appendLastTrains(shown: Journey[], last: Journey[], nowMin: number) {
-  const due = (j: Journey) => departDue(rideDepart(j), nowMin) + (j.delayMin ?? 0);
-  const tail = last.filter((j) => due(j) >= 0 && isLastDepart(rideDepart(j)));
+  const due = (j: Journey) => departDue(j.departHhmm, nowMin) + (j.delayMin ?? 0);
+  const tail = last.filter((j) => due(j) >= 0 && isLastDepart(j.departHhmm));
   sortJourneys(tail);
   const lastIds = new Set(tail.map((j) => `${j.departHhmm}|${routeShape(j)}`));
   const head = shown.filter((j) => !lastIds.has(`${j.departHhmm}|${routeShape(j)}`));
@@ -153,7 +149,7 @@ function departDue(hhmm: string, nowMin: number) {
 
 function journeyLive(j: Journey, nowMin: number) {
   const delay = Math.max(0, j.delayMin ?? 0);
-  const dep = departDue(rideDepart(j), nowMin) + delay;
+  const dep = departDue(j.departHhmm, nowMin) + delay;
   if (dep < 0) return false;
   const horizon = firstTrainWindow(nowMin) ? 12 * 60 : 180;
   if (dep > horizon) return false;
@@ -418,7 +414,7 @@ export async function applyTrip(origin: StationHit | { lng: number; lat: number 
       if (!silent) store.setSearching(false);
       return;
     }
-    const tonight = lastTrainWindow(nowMin) && live.some((j) => departDue(rideDepart(j), nowMin) < 180);
+    const tonight = lastTrainWindow(nowMin) && live.some((j) => departDue(j.departHhmm, nowMin) < 180);
     const merged = tonight
       ? appendLastTrains(live.slice(0, 10), lastTrains.filter(usable), nowMin)
       : live.slice(0, 10);

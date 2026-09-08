@@ -461,11 +461,6 @@ function untilHhmm(hhmm: string, nowMin: number, delay = 0) {
   return minutesUntilDepart(hhmm, nowMin) + Math.max(0, delay);
 }
 
-function rideDepart(j: Journey) {
-  const ride = j.legs.find((l) => l.kind === "ride" && l.departHhmm);
-  return ride?.departHhmm || j.departHhmm;
-}
-
 export function RoutePanel({ journey }: { journey: Journey }) {
   const lang = useMapStore((s) => s.lang);
   const t = copies[lang];
@@ -474,14 +469,8 @@ export function RoutePanel({ journey }: { journey: Journey }) {
   const liveTrains = useMapStore((s) => s.liveTrains);
   const view = stampJourneyDelay(journey, liveTrains);
   const nowMin = tokyoParts(simNow()).minutes;
-  const upcoming = (journeys.length ? journeys : [journey]).filter((j) => untilHhmm(rideDepart(j), nowMin, j.delayMin ?? 0) >= 0);
-  const list = (upcoming.length ? upcoming : []).slice().sort((a, b) => {
-    const da = untilHhmm(rideDepart(a), nowMin, a.delayMin ?? 0);
-    const db = untilHhmm(rideDepart(b), nowMin, b.delayMin ?? 0);
-    if (da !== db) return da - db;
-    if (a.totalMinutes !== b.totalMinutes) return a.totalMinutes - b.totalMinutes;
-    return untilHhmm(a.arriveHhmm, nowMin) - untilHhmm(b.arriveHhmm, nowMin);
-  });
+  const upcoming = (journeys.length ? journeys : [journey]).filter((j) => untilHhmm(j.departHhmm, nowMin, j.delayMin ?? 0) >= 0);
+  const list = upcoming.length ? upcoming : [];
 
   return (
     <section className="flex flex-col gap-3">

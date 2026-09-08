@@ -307,7 +307,8 @@ export async function applyTrip(origin: StationHit | { lng: number; lat: number 
     for (const j of list) {
       if (!j) continue;
       const pinned = pinJourneyDest(j, dest);
-      if (unique) pushJourney(into, seen, pinned);
+      if (j.source === "yahoo") into.push(pinned);
+      else if (unique) pushJourney(into, seen, pinned);
       else into.push(pinned);
     }
   };
@@ -333,7 +334,7 @@ export async function applyTrip(origin: StationHit | { lng: number; lat: number 
     );
     if (lastTrainWindow(nowMin)) {
       const lastQs = new URLSearchParams(qs);
-      lastQs.set("type", "4");
+      lastQs.set("type", "2");
       jobs.push(
         fetch(`/api/transit?${lastQs}`, { signal: AbortSignal.timeout(14000) })
           .then((res) => res.json() as Promise<{ ok?: boolean; journey?: Journey; journeys?: Journey[] }>)
@@ -395,10 +396,9 @@ export async function applyTrip(origin: StationHit | { lng: number; lat: number 
     await Promise.all(jobs);
   } finally {
     const nowMin = tokyoParts(simNow()).minutes;
-    const stillDue = (j: Journey) => departDue(j.departHhmm, nowMin) + (j.delayMin ?? 0) >= -1;
+    const stillDue = (j: Journey) => departDue(j.departHhmm, nowMin) >= 0;
     const yahooAll = journeys.filter((j) => j.source === "yahoo");
     const google = journeys.filter((j) => j.source === "google");
-    const firsts = firstTrains.filter((j) => stillDue(j) && journeyEndsNear(j, dest));
     let live: Journey[] = [];
     if (yahooAll.length) {
       const due = yahooAll.filter(stillDue);
@@ -407,7 +407,10 @@ export async function applyTrip(origin: StationHit | { lng: number; lat: number 
       const due = google.filter((j) => stillDue(j) && journeyEndsNear(j, dest));
       live = due.length ? due : google.filter((j) => journeyEndsNear(j, dest));
     }
-    if (!live.length && firsts.length) live = firsts;
+    if (!live.length) {
+      const firsts = firstTrains.filter((j) => stillDue(j) && journeyEndsNear(j, dest));
+      if (firsts.length) live = firsts;
+    }
     if (!live.length) {
       const local = localJourneys(origin, dest);
       for (const j of liveJourneys(origin, dest)) pushJourney(local.list, local.seen, j);
@@ -419,12 +422,12 @@ export async function applyTrip(origin: StationHit | { lng: number; lat: number 
       if (!silent) store.setSearching(false);
       return;
     }
-    const tonight = lastTrainWindow(nowMin) && live.some((j) => departDue(j.departHhmm, nowMin) < 180);
+    const tonight = !yahooAll.length && lastTrainWindow(nowMin) && live.some((j) => departDue(j.departHhmm, nowMin) < 180);
     const merged = tonight
       ? appendLastTrains(live.slice(0, 10), lastTrains.filter(stillDue), nowMin)
       : live.slice(0, 10);
     const shown = merged.map((j) => stampJourneyDelay(j, store.liveTrains));
-    const keep = shown.filter(stillDue);
+    const keep = shown.filter((j) => departDue(j.departHhmm, nowMin) >= 0);
     const final = keep.length ? keep : shown;
     if (!final.length) {
       store.setJourneys([]);

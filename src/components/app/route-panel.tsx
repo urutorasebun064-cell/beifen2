@@ -2,7 +2,7 @@ import { ArrowRight, Footprints, TrainFront, X } from "lucide-react";
 import { copies, displayName, type Copy, type Lang } from "@/lib/i18n";
 import { journeyDelaySeconds, journeyShowsDelay, stampJourneyDelay } from "@/lib/rail/delay";
 import { haversine, tokyoParts, arriveHhmmOf } from "@/lib/rail/geo";
-import { trainForSchedule, minutesUntilDepart } from "@/lib/rail/simulate";
+import { minutesUntilDepart } from "@/lib/rail/simulate";
 import { ensureConnections } from "@/lib/rail/route";
 import { placeTrainOnLeg, rideWaiting } from "@/lib/rail/timetable-snap";
 import { sliceRailPath } from "@/lib/rail/graph";
@@ -439,9 +439,7 @@ function pickTrainForLeg(leg: RouteLeg): Train | null {
   const from = { ...leg.from };
   const to = { ...leg.to };
   const path = line ? sliceRailPath(line, from, to) : leg.path;
-  const placed = placeTrainOnLeg(leg, line, path, simNow(), store.journey?.delayMin ?? 0);
-  if (placed) return placed;
-  return line ? trainForSchedule(line, simNow(), leg.from.lng, leg.from.lat, leg.toward, leg.departHhmm, leg.to.name) : null;
+  return placeTrainOnLeg(leg, line, path, simNow(), store.journey?.delayMin ?? 0);
 }
 
 function lockRide(leg: RouteLeg) {
@@ -469,8 +467,8 @@ export function RoutePanel({ journey }: { journey: Journey }) {
   const liveTrains = useMapStore((s) => s.liveTrains);
   const view = stampJourneyDelay(journey, liveTrains);
   const nowMin = tokyoParts(simNow()).minutes;
-  const upcoming = (journeys.length ? journeys : [journey]).filter((j) => untilHhmm(j.departHhmm, nowMin, j.delayMin ?? 0) >= 0);
-  const list = upcoming.length ? upcoming : [];
+  const upcoming = (journeys.length ? journeys : [journey]).filter((j) => untilHhmm(j.departHhmm, nowMin, 0) >= 0);
+  const list = upcoming.length ? upcoming : journeys.length ? journeys : [journey];
 
   return (
     <section className="flex flex-col gap-3">

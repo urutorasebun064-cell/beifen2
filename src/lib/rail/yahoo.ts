@@ -220,11 +220,53 @@ function delayFromFeat(feat: YahooFeature): { delayMin: number; delaySec: number
   };
 }
 
+function clockSpan(dep?: string, arr?: string): number {
+  if (!dep || !arr || !/^\d{1,2}:\d{2}$/.test(dep) || !/^\d{1,2}:\d{2}$/.test(arr)) return 0;
+  const [dh, dm] = dep.split(":").map(Number);
+  const [ah, am] = arr.split(":").map(Number);
+  let minutes = (ah ?? 0) * 60 + (am ?? 0) - ((dh ?? 0) * 60 + (dm ?? 0));
+  if (minutes < 0) minutes += 24 * 60;
+  return minutes;
+}
+
 function featureToJourney(feat: YahooFeature, origin: RouteStop, dest: RouteStop): Journey | null {
   const summary = feat.summaryInfo;
   const edges = feat.edgeInfoList ?? [];
   if (!summary?.departureTime || edges.length < 2) return null;
   const legs: RouteLeg[] = [];
+  const pushRide = (leg: RouteLeg) => {
+    const prev = legs[legs.length - 1];
+    if (
+      prev &&
+      prev.kind === "ride" &&
+      leg.kind === "ride" &&
+      railKey(prev.lineName || "") === railKey(leg.lineName || "") &&
+      (prev.to.name || "") === (leg.from.name || "")
+    ) {
+      prev.to = leg.to;
+      prev.arriveHhmm = leg.arriveHhmm;
+      prev.toPlatform = leg.toPlatform;
+      prev.minutes += leg.minutes;
+      return;
+    }
+    if (prev && prev.kind === "ride" && leg.kind === "ride") {
+      const gap = clockSpan(prev.arriveHhmm, leg.departHhmm);
+      if (gap > 0) {
+        legs.push({
+          kind: "walk",
+          from: prev.to,
+          to: leg.from,
+          stops: [prev.to, leg.from],
+          minutes: gap,
+          path: [
+            [prev.to.lng, prev.to.lat],
+            [leg.from.lng, leg.from.lat],
+          ],
+        });
+      }
+    }
+    legs.push(leg);
+  };
   for (let i = 0; i < edges.length - 1; i++) {
     const a = edges[i]!;
     const b = edges[i + 1]!;
@@ -234,12 +276,9 @@ function featureToJourney(feat: YahooFeature, origin: RouteStop, dest: RouteStop
     const to = stop(b.stationName || b.pointName || dest.name, dest);
     const dep = pickTime(a, "dep");
     const arr = pickTime(b, "arr") ?? pickTime(b, "dep");
-    const [dh, dm] = (dep ?? "0:0").split(":").map(Number);
-    const [ah, am] = (arr ?? "0:0").split(":").map(Number);
-    let minutes = (ah ?? 0) * 60 + (am ?? 0) - ((dh ?? 0) * 60 + (dm ?? 0));
-    if (minutes <= 0) minutes += 24 * 60;
+    const minutes = Math.max(1, clockSpan(dep, arr) || 1);
     const destName = a.destination ?? "";
-    legs.push({
+    const leg: RouteLeg = {
       kind: walk ? "walk" : "ride",
       lineName: walk ? undefined : (a.railName ?? "").replace(/・[^・]*行$/u, "") || undefined,
       color: walk ? undefined : railColor(rail),
@@ -250,13 +289,26 @@ function featureToJourney(feat: YahooFeature, origin: RouteStop, dest: RouteStop
       fromPlatform: walk ? undefined : pickPlatform(a, "dep"),
       toPlatform: walk ? undefined : pickPlatform(b, "arr"),
       stops: [from, to],
-      minutes: Math.max(1, minutes),
+      minutes,
       departHhmm: walk ? undefined : dep,
       arriveHhmm: walk ? undefined : arr,
-    });
+    };
+    if (walk) {
+      const prev = legs[legs.length - 1];
+      if (prev && prev.kind === "walk") {
+        prev.to = to;
+        prev.minutes += minutes;
+        prev.stops = [prev.from, to];
+        continue;
+      }
+      legs.push(leg);
+    } else {
+      pushRide(leg);
+    }
   }
   if (!legs.length) return null;
-  const transfers = Math.max(0, legs.filter((l) => l.kind === "ride").length - 1);
+  const xferRaw = Number(summary.transferCount);
+  const transfers = Number.isFinite(xferRaw) ? Math.max(0, xferRaw) : Math.max(0, legs.filter((l) => l.kind === "ride").length - 1);
   const delay = delayFromFeat(feat);
   return {
     origin,

@@ -395,18 +395,23 @@ export async function applyTrip(origin: StationHit | { lng: number; lat: number 
     await Promise.all(jobs);
   } finally {
     const nowMin = tokyoParts(simNow()).minutes;
-    const usable = (j: Journey) => journeyLive(j, nowMin) && journeyEndsNear(j, dest);
-    const yahoo = journeys.filter((j) => j.source === "yahoo" && usable(j));
-    const google = journeys.filter((j) => j.source === "google" && usable(j));
-    const firsts = firstTrains.filter(usable);
+    const stillDue = (j: Journey) => departDue(j.departHhmm, nowMin) + (j.delayMin ?? 0) >= -1;
+    const yahooAll = journeys.filter((j) => j.source === "yahoo");
+    const google = journeys.filter((j) => j.source === "google");
+    const firsts = firstTrains.filter((j) => stillDue(j) && journeyEndsNear(j, dest));
     let live: Journey[] = [];
-    if (yahoo.length) live = yahoo;
-    else if (google.length) live = google;
+    if (yahooAll.length) {
+      const due = yahooAll.filter(stillDue);
+      live = due.length ? due : yahooAll;
+    } else if (google.length) {
+      const due = google.filter((j) => stillDue(j) && journeyEndsNear(j, dest));
+      live = due.length ? due : google.filter((j) => journeyEndsNear(j, dest));
+    }
     if (!live.length && firsts.length) live = firsts;
     if (!live.length) {
       const local = localJourneys(origin, dest);
       for (const j of liveJourneys(origin, dest)) pushJourney(local.list, local.seen, j);
-      live = preferOfficial(local.list).filter(usable);
+      live = preferOfficial(local.list).filter((j) => stillDue(j) && journeyEndsNear(j, dest));
     }
     const store = useMapStore.getState();
     if (!live.length) {
@@ -416,10 +421,12 @@ export async function applyTrip(origin: StationHit | { lng: number; lat: number 
     }
     const tonight = lastTrainWindow(nowMin) && live.some((j) => departDue(j.departHhmm, nowMin) < 180);
     const merged = tonight
-      ? appendLastTrains(live.slice(0, 10), lastTrains.filter(usable), nowMin)
+      ? appendLastTrains(live.slice(0, 10), lastTrains.filter(stillDue), nowMin)
       : live.slice(0, 10);
-    const shown = merged.map((j) => stampJourneyDelay(j, store.liveTrains)).filter((j) => journeyLive(j, nowMin));
-    if (!shown.length) {
+    const shown = merged.map((j) => stampJourneyDelay(j, store.liveTrains));
+    const keep = shown.filter(stillDue);
+    const final = keep.length ? keep : shown;
+    if (!final.length) {
       store.setJourneys([]);
       if (!silent) store.setSearching(false);
       return;
@@ -427,16 +434,16 @@ export async function applyTrip(origin: StationHit | { lng: number; lat: number 
     if (silent) {
       const cur = store.journey;
       const idx = cur
-        ? shown.findIndex((j) => j.departHhmm === cur.departHhmm && routeShape(j) === routeShape(cur))
+        ? final.findIndex((j) => j.departHhmm === cur.departHhmm && routeShape(j) === routeShape(cur))
         : -1;
-      if (idx >= 0) store.setJourneys(shown, idx);
-      void calibrateCorridor(shown);
+      if (idx >= 0) store.setJourneys(final, idx);
+      void calibrateCorridor(final);
       return;
     }
-    store.setJourneys(shown, 0);
+    store.setJourneys(final, 0);
     store.setSearching(false);
-    if (shown[0]) lockJourneyTrain(shown[0], { camera: !silent });
-    void calibrateCorridor(shown);
+    if (final[0]) lockJourneyTrain(final[0], { camera: !silent });
+    void calibrateCorridor(final);
   }
 }
 

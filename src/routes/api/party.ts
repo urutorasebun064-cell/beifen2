@@ -18,7 +18,7 @@ const FILE = join(process.cwd(), ".data", "party-rooms.json");
 
 type Member = { id: string; nick: string; token: string; last: number; online: boolean; host?: boolean; lng?: number; lat?: number; pinAt?: number; near?: string };
 type Msg = { id: number; nick: string; body: string; at: string; uid?: string };
-type Room = { name: string; pass: string; hostId: string; members: Member[]; messages: Msg[]; msgId: number; msgTotal: number; expiresAt: number };
+type Room = { name: string; pass: string; hostId: string; members: Member[]; messages: Msg[]; msgId: number; msgTotal: number; expiresAt: number; born?: number };
 type Saved = Room & { key: string };
 
 type G = typeof globalThis & { __jbPartyRooms?: Map<string, Room>; __jbPartyGone?: Map<string, number> };
@@ -141,6 +141,7 @@ function mergeRoom(key: string, incoming: Room) {
     collapseMembers(next);
     return next;
   }
+  if (cur.born) return cur;
   if (next.messages.length > cur.messages.length) cur.messages = next.messages.slice(-MSG_MAX);
   if (next.msgId > cur.msgId) cur.msgId = next.msgId;
   if ((next.msgTotal || 0) > (cur.msgTotal || 0)) cur.msgTotal = next.msgTotal;
@@ -354,6 +355,7 @@ async function hydrateSql() {
 async function dropRoom(key: string) {
   markGone(key);
   rooms.delete(key);
+  sqlSoon.delete(key);
   flushFile();
   try {
     const sql = await ensureTable();
@@ -642,14 +644,14 @@ export const Route = createFileRoute("/api/party")({
         const key = keyOf(name);
         const pass = String(body.pass ?? "").trim().slice(0, 32);
         const nickRaw = String(body.nick ?? "").trim().slice(0, 12);
-        const nick = nickRaw || "ゲスト";
+        const nick = nickRaw;
         const token = String(body.token ?? "").slice(0, 80);
         const uid = String(body.uid ?? "").slice(0, 80);
         const text = String(body.text ?? "").trim().slice(0, 160);
         const was = String(body.was ?? "").trim().slice(0, 120);
 
         if (action === "create" || action === "join") {
-          if (!key || !pass) return json({ ok: false, error: "need" }, 400);
+          if (!key || !pass || !nick) return json({ ok: false, error: "need" }, 400);
           await purgeExpired();
           if (action === "join" && stillGone(key)) return json({ ok: false, error: "missing" }, 404);
           const found = await lookup(key, name);
@@ -661,7 +663,7 @@ export const Route = createFileRoute("/api/party")({
             const clash = [...rooms.entries()].find(([k, r]) => !stillGone(k) && !expired(r) && (k === key || keyOf(r.name) === key));
             if (clash) return json({ ok: false, error: "exists" }, 409);
             gone.delete(key);
-            room = { name, pass: hashPass(pass), hostId: "", members: [], messages: [], msgId: 1, msgTotal: 0, expiresAt: seedTtl() };
+            room = { name, pass: hashPass(pass), hostId: "", members: [], messages: [], msgId: 1, msgTotal: 0, expiresAt: seedTtl(), born: Date.now() };
             roomKey = key;
             rooms.set(key, room);
           } else {
@@ -735,18 +737,6 @@ export const Route = createFileRoute("/api/party")({
           me.lat = lat;
           me.pinAt = Date.now();
           me.near = String(body.near ?? "").trim().slice(0, 20) || undefined;
-          const line = String(body.text ?? "").trim().slice(0, 160);
-          if (line) {
-            room.messages.push({
-              id: room.msgId++,
-              nick: me.nick,
-              body: line,
-              at: new Date().toISOString(),
-              uid: me.id,
-            });
-            trimMessages(room);
-            bumpTtl(room);
-          }
           await saveRoom(found.key, room);
           return json({ ok: true, ...publicOf(room, me.id, was), you: me.nick, youId: me.id, host: me.id === room.hostId });
         }
@@ -761,6 +751,12 @@ export const Route = createFileRoute("/api/party")({
         if (action === "clear") {
           if (me.id !== room.hostId) return json({ ok: false, error: "host" }, 403);
           room.messages = [];
+          for (const m of room.members) {
+            m.lng = undefined;
+            m.lat = undefined;
+            m.near = undefined;
+            m.pinAt = undefined;
+          }
           await saveRoom(found.key, room);
           return json({ ok: true, ...publicOf(room, me.id, was), you: me.nick, youId: me.id, host: true, expiresAt: room.expiresAt });
         }

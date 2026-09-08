@@ -78,14 +78,18 @@ function userId() {
   }
 }
 
-function nickOf(lang: "ja" | "zh" | "en") {
+function realNick(n?: string) {
+  const s = String(n ?? "").trim().slice(0, 12);
+  if (!s || ["ゲスト", "旅人", "Traveler"].includes(s)) return "";
+  return s;
+}
+
+function nickOf() {
   try {
-    const saved = sessionStorage.getItem("jb-party-nick");
-    if (saved) return saved.slice(0, 12);
+    return realNick(sessionStorage.getItem("jb-party-nick") || localStorage.getItem("jb-party-nick"));
   } catch {
-    /* */
+    return "";
   }
-  return lang === "zh" ? "旅人" : lang === "en" ? "Traveler" : "ゲスト";
 }
 
 type Session = { room: string; token: string; nick: string; open?: boolean; pass?: string };
@@ -151,14 +155,18 @@ function clearSession() {
   }
 }
 
-function loadLast(): { room: string; pass: string } | null {
+function loadLast(): { room: string; pass: string; nick: string } | null {
   for (const store of [sessionStorage, localStorage]) {
     try {
       const raw = store.getItem("jb-party-last");
       if (!raw) continue;
-      const v = JSON.parse(raw) as { room?: string; pass?: string };
+      const v = JSON.parse(raw) as { room?: string; pass?: string; nick?: string };
       if (!v.room) continue;
-      return { room: String(v.room).slice(0, 20), pass: String(v.pass ?? "").slice(0, 32) };
+      return {
+        room: String(v.room).slice(0, 20),
+        pass: String(v.pass ?? "").slice(0, 32),
+        nick: String(v.nick ?? "").slice(0, 12),
+      };
     } catch {
       /* */
     }
@@ -166,8 +174,10 @@ function loadLast(): { room: string; pass: string } | null {
   return null;
 }
 
-function saveLast(room: string, pass: string) {
-  const raw = JSON.stringify({ room, pass });
+function saveLast(room: string, pass: string, nick?: string) {
+  const prev = loadLast();
+  const first = (prev && prev.room === room && realNick(prev.nick) ? prev.nick : realNick(nick)) || "";
+  const raw = JSON.stringify({ room, pass, nick: first });
   try {
     sessionStorage.setItem("jb-party-last", raw);
   } catch {
@@ -233,7 +243,7 @@ export function PartyWindow() {
   const [mode, setMode] = useState<"create" | "join">("join");
   const [room, setRoom] = useState("");
   const [pass, setPass] = useState("");
-  const [nick, setNick] = useState(() => nickOf(lang));
+  const [nick, setNick] = useState(() => nickOf());
   const [token, setToken] = useState("");
   const [joined, setJoined] = useState("");
   const [busy, setBusy] = useState(false);
@@ -259,14 +269,18 @@ export function PartyWindow() {
     const saved = loadSession();
     if (saved) {
       setRoom(saved.room);
-      if (saved.nick) setNick(saved.nick);
+      const last = loadLast();
+      const first = realNick(last && last.room === saved.room ? last.nick : "") || realNick(saved.nick);
+      if (first) setNick(first);
       if (saved.pass) setPass(saved.pass);
+      else if (last?.pass) setPass(last.pass);
       return;
     }
     const last = loadLast();
     if (!last) return;
     setRoom(last.room);
     if (last.pass) setPass(last.pass);
+    if (realNick(last.nick)) setNick(last.nick);
   }, []);
 
   useEffect(() => {
@@ -323,7 +337,7 @@ export function PartyWindow() {
     let live = true;
     const resume = async () => {
       const key = passRef.current;
-      const who = nickRef.current || nickOf(lang);
+      const who = nickRef.current || nickOf();
       if (!key) return false;
       const { res, data } = await partyPost({
         action: "join",
@@ -444,24 +458,31 @@ export function PartyWindow() {
     setBusy(true);
     setErr("");
     try {
+      const roomName = room.trim();
+      const last = loadLast();
+      const who = realNick(last && last.room === roomName ? last.nick : "") || nick.trim();
+      if (!who) {
+        setErr(t.partyNeed);
+        setBusy(false);
+        return;
+      }
       let { res, data } = await partyPost({
         action: mode,
-        room: room.trim(),
+        room: roomName,
         pass: pass.trim(),
-        nick: nick.trim() || nickOf(lang),
+        nick: who,
         token: tokenRef.current,
       });
       if (!res.ok || !data.ok || !data.token) {
         fail(data.error);
         return;
       }
-      const who = nick.trim() || nickOf(lang);
-      const roomName = data.name || room.trim();
-      saveSession({ room: roomName, token: data.token, nick: who, open: true, pass: passRef.current });
-      saveLast(roomName, passRef.current);
+      const joinedName = data.name || roomName;
+      saveSession({ room: joinedName, token: data.token, nick: who, open: true, pass: passRef.current });
+      saveLast(joinedName, passRef.current, who);
       setNick(who);
       setToken(data.token);
-      setJoined(roomName);
+      setJoined(joinedName);
       setState(data);
       setCollapsed(false);
     } finally {
@@ -535,13 +556,15 @@ export function PartyWindow() {
 
   const leave = () => {
     if (joined && token) void partyPost({ action: "leave", room: joined, token, nick: nickRef.current || nick });
-    saveLast(joined || room, passRef.current);
+    saveLast(joined || room, passRef.current, nickRef.current || nick);
     clearSession();
     setJoined("");
     setToken("");
     setState(null);
     setPending([]);
     setCollapsed(false);
+    const first = loadLast();
+    if (realNick(first?.nick)) setNick(first.nick);
     useMapStore.getState().setPartyPins([]);
   };
 
@@ -550,13 +573,15 @@ export function PartyWindow() {
     const { res, data } = await partyPost({ action, room: joined, token, nick: nickRef.current || nick });
     if (!res.ok || !data.ok) return;
     if (data.gone || action === "disband") {
-      saveLast(joined || room, passRef.current);
+      saveLast(joined || room, passRef.current, nickRef.current || nick);
       clearSession();
       setJoined("");
       setToken("");
       setState(null);
       setPending([]);
       setCollapsed(false);
+      const first = loadLast();
+      if (realNick(first?.nick)) setNick(first.nick);
       useMapStore.getState().setPartyPins([]);
       return;
     }
@@ -578,7 +603,6 @@ export function PartyWindow() {
         const lat = pos.coords.latitude;
         if (isInJapan(lng, lat)) useMapStore.getState().setUserLocation({ lng, lat }, "ok");
         const near = stationsNearPlace(useMapStore.getState().stationIndex, lng, lat, 1)[0]?.station.name ?? "";
-        const line = near ? `（${t.partyNear.replace("{n}", near)}）` : "";
         void (async () => {
           try {
             const { res, data } = await partyPost({
@@ -589,7 +613,6 @@ export function PartyWindow() {
               lng: String(lng),
               lat: String(lat),
               near,
-              text: line,
             });
             if (res.ok && data.ok) {
               setState(data);
@@ -860,6 +883,7 @@ export function PartyWindow() {
                       setMode("join");
                       const last = loadLast();
                       if (last && last.room === row.name && last.pass) setPass(last.pass);
+                      if (last && last.room === row.name && realNick(last.nick)) setNick(last.nick);
                     }}
                   >
                     {row.name}

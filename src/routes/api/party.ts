@@ -1,9 +1,14 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
+import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { createFileRoute } from "@tanstack/react-router";
 import { getSql } from "@/lib/db";
 import { hanFold } from "@/lib/han";
+
+const require = createRequire(import.meta.url);
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const webpush = require("web-push") as any;
 
 const PARTY_MAX = 5;
 const AWAY_MS = 90 * 1000;
@@ -15,8 +20,10 @@ const LIVE_MS = 3 * DAY_MS;
 const CAP_MS = 7 * DAY_MS;
 const GONE_MS = 20 * 60 * 1000;
 const FILE = join(process.cwd(), ".data", "party-rooms.json");
+const VAPID_FILE = join(process.cwd(), ".data", "party-vapid.json");
 
-type Member = { id: string; nick: string; token: string; last: number; online: boolean; host?: boolean; lng?: number; lat?: number; pinAt?: number; near?: string };
+type PushSub = { endpoint: string; p256dh: string; auth: string };
+type Member = { id: string; nick: string; token: string; last: number; online: boolean; host?: boolean; lng?: number; lat?: number; pinAt?: number; near?: string; push?: PushSub };
 type Msg = { id: number; nick: string; body: string; at: string; uid?: string };
 type Room = { name: string; pass: string; hostId: string; members: Member[]; messages: Msg[]; msgId: number; msgTotal: number; expiresAt: number; born?: number };
 type Saved = Room & { key: string };
@@ -26,6 +33,78 @@ const rooms: Map<string, Room> =
   (globalThis as G).__jbPartyRooms ?? ((globalThis as G).__jbPartyRooms = new Map<string, Room>());
 const gone: Map<string, number> =
   (globalThis as G).__jbPartyGone ?? ((globalThis as G).__jbPartyGone = new Map<string, number>());
+
+type Vapid = { publicKey: string; privateKey: string };
+type GV = typeof globalThis & { __jbPartyVapid?: Vapid };
+function loadVapid(): Vapid {
+  const g = globalThis as GV;
+  if (g.__jbPartyVapid?.publicKey && g.__jbPartyVapid.privateKey) return g.__jbPartyVapid;
+  try {
+    const raw = JSON.parse(readFileSync(VAPID_FILE, "utf8")) as Vapid;
+    if (raw?.publicKey && raw.privateKey) {
+      g.__jbPartyVapid = raw;
+      return raw;
+    }
+  } catch {
+    /* */
+  }
+  const keys = webpush.generateVAPIDKeys();
+  g.__jbPartyVapid = keys;
+  try {
+    mkdirSync(dirname(VAPID_FILE), { recursive: true });
+    writeFileSync(VAPID_FILE, JSON.stringify(keys));
+  } catch {
+    /* */
+  }
+  return keys;
+}
+
+function vapidPub() {
+  return loadVapid().publicKey;
+}
+
+async function ensureVapid() {
+  const g = globalThis as GV;
+  try {
+    const sql = await getSql();
+    await sql.query("create table if not exists party_meta (k text primary key, v text not null)");
+    const rows = await sql.query<{ v: string }>("select v from party_meta where k = 'vapid'");
+    const raw = rows[0]?.v ? (JSON.parse(rows[0].v) as Vapid) : null;
+    if (raw?.publicKey && raw.privateKey) {
+      g.__jbPartyVapid = raw;
+      return raw;
+    }
+    const keys = loadVapid();
+    await sql.query("insert into party_meta (k, v) values ('vapid', $1) on conflict (k) do nothing", [JSON.stringify(keys)]);
+    const again = await sql.query<{ v: string }>("select v from party_meta where k = 'vapid'");
+    const stored = again[0]?.v ? (JSON.parse(again[0].v) as Vapid) : null;
+    if (stored?.publicKey && stored.privateKey) g.__jbPartyVapid = stored;
+    return g.__jbPartyVapid ?? keys;
+  } catch {
+    return loadVapid();
+  }
+}
+
+async function pingPush(room: Room, exceptId: string, title: string, body: string) {
+  const keys = loadVapid();
+  try {
+    webpush.setVapidDetails("mailto:party@jbmap.app", keys.publicKey, keys.privateKey);
+  } catch {
+    return;
+  }
+  const payload = JSON.stringify({ title, body, tag: "jb-party" });
+  const jobs = room.members
+    .filter((m) => m.id !== exceptId && m.push?.endpoint && m.push.p256dh && m.push.auth)
+    .map((m) =>
+      webpush
+        .sendNotification({ endpoint: m.push!.endpoint, keys: { p256dh: m.push!.p256dh, auth: m.push!.auth } }, payload)
+        .catch(() => {
+          m.push = undefined;
+        }),
+    );
+  if (!jobs.length) return;
+  await Promise.race([Promise.allSettled(jobs), new Promise((r) => setTimeout(r, 1600))]);
+}
 
 function markGone(key: string) {
   gone.set(key, Date.now());
@@ -113,6 +192,14 @@ function asMember(raw: Partial<Member> & { uid?: string }): Member | null {
     lat: Number.isFinite(Number(raw.lat)) ? Number(raw.lat) : undefined,
     pinAt: Number(raw.pinAt) || undefined,
     near: String(raw.near ?? "").trim().slice(0, 20) || undefined,
+    push:
+      raw.push && String(raw.push.endpoint || "").startsWith("http")
+        ? {
+            endpoint: String(raw.push.endpoint).slice(0, 512),
+            p256dh: String(raw.push.p256dh || "").slice(0, 200),
+            auth: String(raw.push.auth || "").slice(0, 80),
+          }
+        : undefined,
   };
 }
 
@@ -158,6 +245,7 @@ function mergeRoom(key: string, incoming: Room) {
       have.online = m.online;
     }
     have.id = have.id || m.id;
+    have.push = m.push || have.push;
     if ((m.pinAt || 0) >= (have.pinAt || 0) && Number.isFinite(m.lng) && Number.isFinite(m.lat)) {
       have.lng = m.lng;
       have.lat = m.lat;
@@ -437,10 +525,12 @@ function collapseMembers(room: Room, keepId?: string) {
       if (prev.id === room.hostId) room.hostId = m.id;
       m.token = m.token || prev.token;
       m.nick = m.nick || prev.nick;
+      m.push = m.push || prev.push;
       byId.set(key, m);
     } else {
       prev.token = prev.token || m.token;
       prev.nick = prev.nick || m.nick;
+      prev.push = prev.push || m.push;
     }
   };
   for (const m of room.members) {
@@ -624,6 +714,7 @@ export const Route = createFileRoute("/api/party")({
   server: {
     handlers: {
       GET: async ({ request }) => {
+        await ensureVapid();
         const url = new URL(request.url);
         if (url.searchParams.get("list") === "1") {
           hydrateFile();
@@ -672,9 +763,10 @@ export const Route = createFileRoute("/api/party")({
         dropOldSelf(room, me, uid, token, wasQ);
         collapseMembers(room, me.id);
         if (room.members.length !== n0) void saveRoom(key, room);
-        return json({ ok: true, ...publicOf(room, me.id, wasQ), you: me.nick, youId: me.id, host: me.id === room.hostId });
+        return json({ ok: true, vapid: vapidPub(), ...publicOf(room, me.id, wasQ), you: me.nick, youId: me.id, host: me.id === room.hostId });
       },
       POST: async ({ request }) => {
+        await ensureVapid();
         let body: {
           action?: string;
           room?: string;
@@ -687,6 +779,9 @@ export const Route = createFileRoute("/api/party")({
           lng?: string | number;
           lat?: string | number;
           near?: string;
+          endpoint?: string;
+          p256dh?: string;
+          auth?: string;
         } = {};
         try {
           body = (await request.json()) as typeof body;
@@ -733,6 +828,7 @@ export const Route = createFileRoute("/api/party")({
           await saveRoom(roomKey, room);
           return json({
             ok: true,
+            vapid: vapidPub(),
             token: member.token,
             you: member.nick,
             youId: member.id,
@@ -767,7 +863,16 @@ export const Route = createFileRoute("/api/party")({
 
         if (action === "beat") {
           await saveRoom(found.key, room, false);
-          return json({ ok: true, ...publicOf(room, me.id, was), you: me.nick, youId: me.id, host: me.id === room.hostId });
+          return json({ ok: true, vapid: vapidPub(), ...publicOf(room, me.id, was), you: me.nick, youId: me.id, host: me.id === room.hostId });
+        }
+        if (action === "push") {
+          const endpoint = String(body.endpoint ?? "").trim().slice(0, 512);
+          const p256dh = String(body.p256dh ?? "").trim().slice(0, 200);
+          const auth = String(body.auth ?? "").trim().slice(0, 80);
+          if (!endpoint.startsWith("http") || !p256dh || !auth) return json({ ok: false, error: "need" }, 400);
+          me.push = { endpoint, p256dh, auth };
+          await saveRoom(found.key, room);
+          return json({ ok: true, vapid: vapidPub(), ...publicOf(room, me.id, was), you: me.nick, youId: me.id, host: me.id === room.hostId });
         }
         if (action === "send") {
           if (!text) return json({ ok: false, error: "need" }, 400);
@@ -781,7 +886,8 @@ export const Route = createFileRoute("/api/party")({
           trimMessages(room);
           bumpTtl(room);
           await saveRoom(found.key, room);
-          return json({ ok: true, ...publicOf(room, me.id, was), you: me.nick, youId: me.id, host: me.id === room.hostId });
+          await pingPush(room, me.id, room.name, `${me.nick}: ${text}`);
+          return json({ ok: true, vapid: vapidPub(), ...publicOf(room, me.id, was), you: me.nick, youId: me.id, host: me.id === room.hostId });
         }
         if (action === "share") {
           const lng = Number(body.lng);

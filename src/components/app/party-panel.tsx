@@ -1,4 +1,4 @@
-import { Component, FormEvent, useEffect, useRef, useState, type ReactNode } from "react";
+import { Component, FormEvent, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { ChevronDown, Navigation, X } from "lucide-react";
 import { copies } from "@/lib/i18n";
 import { hanFold } from "@/lib/han";
@@ -10,7 +10,7 @@ import { useMapStore } from "@/store/map-store";
 
 type Member = { id: string; nick: string; online?: boolean; host?: boolean; lng?: number; lat?: number; pinAt?: number; near?: string };
 type Msg = { id: number; nick: string; body: string; at: string; uid?: string };
-type RoomState = { name: string; members: Member[]; messages: Msg[]; seats: number; you?: string; youId?: string; host?: boolean; hostId?: string; expiresAt?: number };
+type RoomState = { name: string; members: Member[]; messages: Msg[]; seats: number; you?: string; youId?: string; host?: boolean; hostId?: string; expiresAt?: number; vapid?: string };
 
 function foldMembers(list: Member[], meId: string, you: string) {
   const me = you.trim();
@@ -185,6 +185,34 @@ function saveLast(room: string, pass: string, nick?: string) {
   }
   try {
     localStorage.setItem("jb-party-last", raw);
+  } catch {
+    /* */
+  }
+}
+
+function url64(s: string) {
+  const pad = "=".repeat((4 - (s.length % 4)) % 4);
+  const raw = atob((s + pad).replace(/-/g, "+").replace(/_/g, "/"));
+  const out = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+  return out;
+}
+
+async function bindPush(room: string, token: string, vapid?: string) {
+  if (!room || !token || !vapid) return;
+  if (!("Notification" in window) || !("serviceWorker" in navigator) || !("PushManager" in window)) return;
+  try {
+    if (Notification.permission === "default") await Notification.requestPermission();
+    if (Notification.permission !== "granted") return;
+    const reg = await navigator.serviceWorker.ready;
+    let sub = await reg.pushManager.getSubscription();
+    sub ??= await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: url64(vapid) });
+    const json = sub.toJSON();
+    const endpoint = String(json.endpoint ?? "");
+    const p256dh = String(json.keys?.p256dh ?? "");
+    const auth = String(json.keys?.auth ?? "");
+    if (!endpoint || !p256dh || !auth) return;
+    await partyPost({ action: "push", room, token, nick: nickOf(), endpoint, p256dh, auth });
   } catch {
     /* */
   }
@@ -391,6 +419,7 @@ export function PartyWindow() {
   const joinedRef = useRef(joined);
   const tokenRef = useRef(token);
   const lastHeardRef = useRef(0);
+  const pushBoundRef = useRef("");
   passRef.current = pass;
   nickRef.current = nick;
   joinedRef.current = joined;
@@ -398,10 +427,18 @@ export function PartyWindow() {
 
   useEffect(() => {
     const onMsg = (e: MessageEvent) => {
-      if (e.data?.type !== "party-open") return;
-      useMapStore.getState().setPartyMenuOpen(true);
-      useMapStore.getState().setPartyCollapsed(false);
-      clearPartyBadge();
+      if (e.data?.type === "party-open") {
+        useMapStore.getState().setPartyMenuOpen(true);
+        useMapStore.getState().setPartyCollapsed(false);
+        clearPartyBadge();
+        return;
+      }
+      if (e.data?.type === "party-alert") {
+        const viewing = !useMapStore.getState().partyCollapsed && useMapStore.getState().partyMenuOpen && document.visibilityState === "visible";
+        if (viewing) return;
+        markUnread();
+        pingChat();
+      }
     };
     navigator.serviceWorker?.addEventListener("message", onMsg);
     return () => navigator.serviceWorker?.removeEventListener("message", onMsg);
@@ -544,6 +581,10 @@ export function PartyWindow() {
           }
           if (top) lastHeardRef.current = top;
           setState(data);
+          if (data.vapid && pushBoundRef.current !== tokenRef.current) {
+            pushBoundRef.current = tokenRef.current;
+            void bindPush(roomName, tokenRef.current, data.vapid);
+          }
           setPending((rows) => {
             if (!(data.messages?.length)) return [];
             return rows.filter((p) => !data.messages?.some((m) => m.body === p.body && (m.uid === userId() || m.nick === p.nick)));
@@ -589,10 +630,22 @@ export function PartyWindow() {
     };
   }, [joined, token, lang, t.partyFull]);
 
-  useEffect(() => {
-    const el = logRef.current;
-    if (el && stickRef.current) el.scrollTop = el.scrollHeight;
-  }, [state?.messages.length]);
+  useLayoutEffect(() => {
+    if (!open || collapsed || !joined) return;
+    stickRef.current = true;
+    const go = () => {
+      const el = logRef.current;
+      if (!el) return;
+      el.scrollTop = el.scrollHeight;
+    };
+    go();
+    const frame = requestAnimationFrame(go);
+    const t = window.setTimeout(go, 40);
+    return () => {
+      cancelAnimationFrame(frame);
+      window.clearTimeout(t);
+    };
+  }, [open, collapsed, joined, state?.messages.length, pending.length]);
 
   const sawOpenRef = useRef(false);
   useEffect(() => {
@@ -669,6 +722,10 @@ export function PartyWindow() {
         if ("Notification" in window && Notification.permission === "default") void Notification.requestPermission();
       } catch {
         /* */
+      }
+      if (data.vapid) {
+        pushBoundRef.current = data.token;
+        void bindPush(joinedName, data.token, data.vapid);
       }
       clearPartyBadge();
       useMapStore.getState().setPartyInRoom(true);

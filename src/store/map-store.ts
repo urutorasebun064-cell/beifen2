@@ -283,6 +283,17 @@ export const useMapStore = create<MapStore>((set, get) => ({
       stayScreen: stayLayer ? s.stayScreen : null,
       stayWalk: stayLayer ? s.stayWalk : false,
       stayChat: stayLayer ? s.stayChat : false,
+      ...(stayLayer
+        ? {
+            konbiniBrand: null,
+            konbiniStores: [],
+            konbiniLoading: false,
+            selectedKonbini: null,
+            konbiniScreen: null,
+            konbiniChat: false,
+            konbiniWalk: false,
+          }
+        : {}),
     })),
   stayMenuOpen: false,
   setStayMenuOpen: (stayMenuOpen) => set({ stayMenuOpen }),
@@ -328,6 +339,15 @@ export const useMapStore = create<MapStore>((set, get) => ({
       selectedKonbini: konbiniBrand === "all" ? s.selectedKonbini : konbiniBrand && s.selectedKonbini?.brand === konbiniBrand ? s.selectedKonbini : null,
       konbiniScreen: konbiniBrand ? s.konbiniScreen : null,
       konbiniChat: konbiniBrand ? s.konbiniChat : false,
+      ...(konbiniBrand
+        ? {
+            stayLayer: false,
+            selectedStay: null,
+            stayScreen: null,
+            stayWalk: false,
+            stayChat: false,
+          }
+        : {}),
     })),
   konbiniStores: [],
   setKonbiniStores: (konbiniStores) => set({ konbiniStores }),

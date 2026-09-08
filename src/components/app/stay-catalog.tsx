@@ -101,12 +101,15 @@ export function StayCatalog() {
     if (selected || stayLayer) {
       useMapStore.getState().exclusiveOpen("stay");
       setGroupOpen(true);
+    } else {
+      setGroupOpen(false);
     }
   }, [selected, stayLayer]);
   useEffect(() => {
     if (konbiniBrand) {
       useMapStore.getState().exclusiveOpen("stay");
       setKonbiniOpen(true);
+      setGroupOpen(false);
     } else {
       setKonbiniOpen(false);
     }
@@ -133,7 +136,18 @@ export function StayCatalog() {
               onClick={() => {
                 const next = !groupOpen;
                 setGroupOpen(next);
-                if (STAYS.length) useMapStore.getState().setStayLayer(next);
+                if (next) {
+                  setKonbiniOpen(false);
+                  const s = useMapStore.getState();
+                  s.setKonbiniBrand(null);
+                  s.selectKonbini(null);
+                  s.setKonbiniStores([]);
+                  s.setKonbiniWalk(false);
+                  s.setKonbiniChat(false);
+                  if (STAYS.length) s.setStayLayer(true);
+                } else {
+                  useMapStore.getState().setStayLayer(false);
+                }
               }}
             >
               {t.stayGroup}
@@ -159,8 +173,15 @@ export function StayCatalog() {
               onClick={() => {
                 setKonbiniOpen((v) => {
                   const next = !v;
-                  if (next) openKonbiniLayer();
-                  else {
+                  if (next) {
+                    setGroupOpen(false);
+                    const s = useMapStore.getState();
+                    s.setStayLayer(false);
+                    s.selectStay(null);
+                    s.setStayWalk(false);
+                    s.setStayChat(false);
+                    openKonbiniLayer();
+                  } else {
                     const s = useMapStore.getState();
                     s.setKonbiniBrand(null);
                     s.selectKonbini(null);

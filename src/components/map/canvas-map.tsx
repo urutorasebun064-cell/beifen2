@@ -1188,32 +1188,19 @@ function clipPathBetween(
   return out;
 }
 
-function ridePathLen(pts: [number, number][]) {
-  let km = 0;
-  for (let i = 1; i < pts.length; i++) km += haversine(pts[i - 1]!, pts[i]!);
-  return km;
-}
-
 function rideSegPath(
   line: LineRuntime | null,
   from: { lng: number; lat: number; name?: string },
   to: { lng: number; lat: number; name?: string },
   fallback: [number, number][] | undefined,
 ): [number, number][] {
-  const hop = haversine([from.lng, from.lat], [to.lng, to.lat]);
-  const ok = (pts: [number, number][]) => {
-    if (pts.length < 2) return false;
-    const len = ridePathLen(pts);
-    if (hop < 0.4) return len < 8;
-    return len < hop * 1.85 + 12;
-  };
   if (line) {
     const sliced = sliceRailPath(line, from, to);
-    if (ok(sliced)) return sliced;
+    if (sliced.length >= 2) return sliced;
   }
   if (fallback && fallback.length > 2) {
     const clipped = clipPathBetween(fallback, from, to);
-    if (ok(clipped)) return clipped;
+    if (clipped.length >= 2) return clipped;
   }
   return [];
 }

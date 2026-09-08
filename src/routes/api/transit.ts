@@ -73,6 +73,11 @@ function clockDue(hhmm: string, nowMin: number) {
   return d;
 }
 
+function rideDepart(j: Journey) {
+  const ride = j.legs.find((l) => l.kind === "ride" && l.departHhmm);
+  return ride?.departHhmm || j.departHhmm;
+}
+
 function mergeJourneys(rows: Journey[][]) {
   const seen = new Set<string>();
   const out: Journey[] = [];
@@ -86,11 +91,11 @@ function mergeJourneys(rows: Journey[][]) {
   }
   const nowMin = tokyoParts().minutes;
   out.sort((a, b) => {
-    const aa = clockDue(a.arriveHhmm, nowMin);
-    const bb = clockDue(b.arriveHhmm, nowMin);
-    if (aa !== bb) return aa - bb;
+    const da = clockDue(rideDepart(a), nowMin);
+    const db = clockDue(rideDepart(b), nowMin);
+    if (da !== db) return da - db;
     if (a.totalMinutes !== b.totalMinutes) return a.totalMinutes - b.totalMinutes;
-    return clockDue(a.departHhmm, nowMin) - clockDue(b.departHhmm, nowMin);
+    return clockDue(a.arriveHhmm, nowMin) - clockDue(b.arriveHhmm, nowMin);
   });
   return out;
 }

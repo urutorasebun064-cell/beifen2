@@ -217,15 +217,36 @@ function pingChat() {
   try {
     audioCtx ??= new AudioContext();
     void audioCtx.resume();
-    const o = audioCtx.createOscillator();
-    const g = audioCtx.createGain();
-    o.type = "triangle";
-    o.frequency.value = 880;
-    g.gain.value = 0.09;
-    o.connect(g);
-    g.connect(audioCtx.destination);
-    o.start();
-    o.stop(audioCtx.currentTime + 0.16);
+    const now = audioCtx.currentTime;
+    const ding = (freq: number, at: number) => {
+      const o = audioCtx!.createOscillator();
+      const g = audioCtx!.createGain();
+      o.type = "sine";
+      o.frequency.value = freq;
+      g.gain.setValueAtTime(0.0001, at);
+      g.gain.exponentialRampToValueAtTime(0.05, at + 0.012);
+      g.gain.exponentialRampToValueAtTime(0.0001, at + 0.09);
+      o.connect(g);
+      g.connect(audioCtx!.destination);
+      o.start(at);
+      o.stop(at + 0.1);
+    };
+    ding(1568, now);
+    ding(1976, now + 0.12);
+  } catch {
+    /* */
+  }
+}
+
+function markUnread() {
+  useMapStore.getState().setPartyAlert(true);
+  try {
+    localStorage.setItem("jb-party-unread", "1");
+  } catch {
+    /* */
+  }
+  try {
+    void navigator.setAppBadge?.(1);
   } catch {
     /* */
   }
@@ -234,20 +255,41 @@ function pingChat() {
 function clearPartyBadge() {
   useMapStore.getState().setPartyAlert(false);
   try {
+    localStorage.removeItem("jb-party-unread");
+  } catch {
+    /* */
+  }
+  try {
     void navigator.clearAppBadge?.();
   } catch {
     /* */
   }
 }
 
-async function partyNotify(title: string, body: string) {
-  useMapStore.getState().setPartyAlert(true);
-  pingChat();
+function seenKey(room: string) {
+  return `jb-party-seen:${room}`;
+}
+
+function loadSeen(room: string) {
   try {
-    void navigator.setAppBadge?.(1);
+    return Number(localStorage.getItem(seenKey(room))) || 0;
+  } catch {
+    return 0;
+  }
+}
+
+function saveSeen(room: string, id: number) {
+  if (!room || !id) return;
+  try {
+    localStorage.setItem(seenKey(room), String(id));
   } catch {
     /* */
   }
+}
+
+async function partyNotify(title: string, body: string) {
+  markUnread();
+  pingChat();
   try {
     if (!("Notification" in window)) return;
     if (Notification.permission === "default") await Notification.requestPermission();
@@ -270,10 +312,17 @@ export function PartyButton() {
   const inRoom = useMapStore((s) => s.partyInRoom);
   const collapsed = useMapStore((s) => s.partyCollapsed);
   const alert = useMapStore((s) => s.partyAlert);
+  useEffect(() => {
+    try {
+      if (localStorage.getItem("jb-party-unread") === "1") useMapStore.getState().setPartyAlert(true);
+    } catch {
+      /* */
+    }
+  }, []);
   return (
     <button
       type="button"
-      className={`relative inline-flex min-h-36 w-11 items-center justify-center rounded-[var(--radius-md)] bg-surface/94 py-3 text-xs font-medium shadow-[var(--shadow-border)] backdrop-blur-md [writing-mode:vertical-rl] ${open || inRoom ? "text-accent" : "text-fg"} ${lang === "zh" ? "tracking-normal" : "tracking-[0.18em]"}`}
+      className={`relative inline-flex min-h-36 w-11 items-center justify-center overflow-visible rounded-[var(--radius-md)] bg-surface/94 py-3 text-xs font-medium shadow-[var(--shadow-border)] backdrop-blur-md [writing-mode:vertical-rl] ${open || inRoom ? "text-accent" : "text-fg"} ${lang === "zh" ? "tracking-normal" : "tracking-[0.18em]"}`}
       onClick={() => {
         const s = useMapStore.getState();
         if (s.partyInRoom) {
@@ -291,7 +340,9 @@ export function PartyButton() {
     >
       {inRoom ? t.partyParty : t.partyMenu}
       {alert ? (
-        <span className="absolute right-0.5 top-1.5 [writing-mode:horizontal-tb] text-[13px] font-black leading-none text-[#e4453a]">!</span>
+        <span className="absolute -right-1 -top-1 z-10 flex size-4 items-center justify-center rounded-full bg-[#e4453a] text-[11px] font-black leading-none text-white [writing-mode:horizontal-tb]">
+          !
+        </span>
       ) : null}
     </button>
   );
@@ -473,14 +524,22 @@ export function PartyWindow() {
           const msgs = data.messages ?? [];
           const top = msgs.reduce((n, m) => Math.max(n, m.id || 0), 0);
           const prev = lastHeardRef.current;
-          if (prev > 0 && top > prev) {
-            const fresh = msgs.filter((m) => (m.id || 0) > prev && m.uid !== mine && m.nick !== nickRef.current);
-            if (fresh.length) {
-              const s = useMapStore.getState();
-              if (s.partyCollapsed || !s.partyMenuOpen || document.hidden) {
+          const roomName = data.name || joinedRef.current;
+          const seen = loadSeen(roomName);
+          const viewing = !useMapStore.getState().partyCollapsed && useMapStore.getState().partyMenuOpen && document.visibilityState === "visible";
+          if (viewing) {
+            if (top) saveSeen(roomName, top);
+            clearPartyBadge();
+          } else if (top > seen) {
+            const fresh = msgs.filter((m) => (m.id || 0) > Math.max(prev, seen) && m.uid !== mine && m.nick !== nickRef.current);
+            if (fresh.length || (prev === 0 && top > seen)) {
+              markUnread();
+              if (fresh.length) {
                 const last = fresh[fresh.length - 1]!;
-                void partyNotify(data.name || joinedRef.current, `${last.nick}: ${last.body}`);
+                void partyNotify(roomName, `${last.nick}: ${last.body}`);
               }
+            } else {
+              markUnread();
             }
           }
           if (top) lastHeardRef.current = top;
@@ -514,7 +573,7 @@ export function PartyWindow() {
       }
     };
     void pull();
-    const id = window.setInterval(pull, 2000);
+    const id = window.setInterval(pull, 700);
     const onShow = () => {
       if (document.visibilityState === "visible") void pull();
     };
@@ -871,44 +930,36 @@ export function PartyWindow() {
                 {Array.from({ length: seats }, (_, i) => {
                   const m = members[i];
                   const mine = Boolean(m && m.id === meId);
+                  const has = Boolean(m && Number.isFinite(m.lng) && Number.isFinite(m.lat));
+                  const label = m?.near ? t.partyNear.replace("{n}", m.near) : t.partyNoPin;
                   return (
-                    <div key={m?.id ?? `empty-${i}`} className={`rpg-slot ${mine ? "text-accent" : ""}`}>
+                    <div key={m?.id ?? `empty-${i}`} className={`rpg-slot min-h-[3.4rem] flex-col justify-center gap-0.5 ${mine ? "text-accent" : ""}`}>
                       {m ? (
-                        <span>
-                          {m.nick}
-                          {mine ? ` · ${t.partyYou}` : m.online === false ? ` · ${t.partyOffline}` : ""}
-                        </span>
+                        <>
+                          <span>
+                            {m.nick}
+                            {mine ? ` · ${t.partyYou}` : m.online === false ? ` · ${t.partyOffline}` : ""}
+                          </span>
+                          {has ? (
+                            <button
+                              type="button"
+                              className="max-w-full truncate text-[10px] font-medium leading-tight text-fg-muted"
+                              onClick={() => lockMate(m)}
+                            >
+                              {label}
+                            </button>
+                          ) : (
+                            <span className="text-[10px] font-medium leading-tight text-fg-muted">{t.partyNoPin}</span>
+                          )}
+                          {mine && has ? (
+                            <button type="button" className="text-[10px] font-medium leading-tight text-fg-muted" onClick={() => void stopShare()}>
+                              {t.partyUnshare}
+                            </button>
+                          ) : null}
+                        </>
                       ) : (
                         <span className="font-medium text-fg-muted">{t.partySlot}</span>
                       )}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-            <div className="border-b border-border px-3 py-2">
-              <p className="mb-1.5 text-[11px] font-medium text-fg-muted">{t.partyPins}</p>
-              <div className="flex max-h-28 flex-col gap-1 overflow-y-auto">
-                {members.map((m) => {
-                  const has = Number.isFinite(m.lng) && Number.isFinite(m.lat);
-                  const mine = m.id === meId;
-                  const label = m.near ? `（${t.partyNear.replace("{n}", m.near)}）` : "";
-                  return (
-                    <div key={`pin-${m.id}`} className="flex items-center justify-between gap-2 rounded-[var(--radius-sm)] bg-fg/8 px-2 py-1.5 text-xs text-fg">
-                      <button
-                        type="button"
-                        className={`min-w-0 flex-1 truncate text-left ${has ? "" : "opacity-60"}`}
-                        disabled={!has}
-                        onClick={() => lockMate(m)}
-                      >
-                        <span className="font-medium">{m.nick}</span>
-                        {has ? <span className="ml-1 text-fg-muted">{label}</span> : <span className="ml-1 text-fg-muted">{t.partyNoPin}</span>}
-                      </button>
-                      {mine && has ? (
-                        <button type="button" className="shrink-0 text-fg-muted" onClick={() => void stopShare()}>
-                          {t.partyUnshare}
-                        </button>
-                      ) : null}
                     </div>
                   );
                 })}

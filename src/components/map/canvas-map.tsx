@@ -22,7 +22,7 @@ import {
 } from "@/lib/weather";
 import type { Journey, LineRuntime, RouteLeg, StationHit, Train } from "@/lib/rail/types";
 import { Button } from "@/components/ui/button";
-import { calibrateTrain, calibrateStation, fillPickedStation, locateUser } from "@/components/app/search-panel";
+import { applyMateTrip, calibrateTrain, calibrateStation, fillPickedStation, locateUser } from "@/components/app/search-panel";
 import { findLineForLeg, locateStation, sliceRailPath } from "@/lib/rail/graph";
 import { placeTrainOnLeg, stopIndexByName } from "@/lib/rail/timetable-snap";
 import { arrivalCompare, journeyGuide, rideHeadline } from "@/components/app/route-panel";
@@ -4305,15 +4305,19 @@ export function CanvasMap() {
         return;
       }
       for (const pin of useMapStore.getState().partyPins) {
-        if (pin.mine) continue;
         const [x, y] = project(pin.lng, pin.lat, cam, w, h);
         if (Math.hypot(x - sx, y - sy) < 28 || Math.hypot(x - sx, y - 18 - sy) < 22) {
           const s = useMapStore.getState();
-          if (s.selectedMate?.id === pin.id) return;
-          s.selectMate({ id: pin.id, nick: pin.nick, lng: pin.lng, lat: pin.lat, station: pin.station });
-          s.setMateWalk(false);
           s.setPartyCollapsed(true);
-          s.requestFlyTo({ lng: pin.lng, lat: pin.lat, zoom: 14.2, bearing: 0, pitch: 0.55, center: true });
+          if (pin.mine) {
+            s.requestFlyTo({ lng: pin.lng, lat: pin.lat, bearing: 0, pitch: 0.55 });
+            return;
+          }
+          if (s.selectedMate?.id === pin.id && s.mateWalk) return;
+          s.selectMate({ id: pin.id, nick: pin.nick, lng: pin.lng, lat: pin.lat, station: pin.station });
+          void applyMateTrip({ nick: pin.nick, lng: pin.lng, lat: pin.lat }).then((ok) => {
+            if (!ok) useMapStore.getState().requestFlyTo({ lng: pin.lng, lat: pin.lat, bearing: 0, pitch: 0.55 });
+          });
           return;
         }
       }

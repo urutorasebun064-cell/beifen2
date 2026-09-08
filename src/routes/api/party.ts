@@ -510,16 +510,20 @@ function nickTaken(room: Room, nick: string, exceptId?: string) {
   const fold = hanFold(n);
   return room.members.some((m) => {
     if (exceptId && (m.id === exceptId || m.token === exceptId)) return false;
+    if (!isLive(m)) return false;
     const mn = (m.nick || "").trim();
     return mn === n || hanFold(mn) === fold;
   });
 }
 
 function dropOldSelf(room: Room, keep: Member, uid: string, token: string, was: string) {
+  const fold = hanFold(keep.nick || "");
   room.members = room.members.filter((m) => {
     if (m === keep) return true;
     if (uid && m.id === uid) return false;
     if (token && m.token && m.token === token) return false;
+    const mn = (m.nick || "").trim();
+    if (fold && (mn === keep.nick || hanFold(mn) === fold) && (!isLive(m) || (uid && m.id === uid))) return false;
     return true;
   });
 }
@@ -546,9 +550,16 @@ async function kickFromOthers(uid: string, token: string, keepKey: string) {
 function takeSeat(room: Room, nick: string, token: string, uid: string, was = "") {
   markAway(room);
   const id = uid || token;
+  const fold = nick ? hanFold(nick) : "";
   const have =
     (id ? room.members.find((m) => m.id === id) : undefined) ??
     (token ? room.members.find((m) => m.token === token) : undefined) ??
+    (nick
+      ? room.members.find((m) => {
+          const mn = (m.nick || "").trim();
+          return !isLive(m) && (mn === nick || hanFold(mn) === fold);
+        })
+      : undefined) ??
     null;
   if (have) {
     if (nick && nickTaken(room, nick, have.id)) return "nick" as const;
@@ -716,7 +727,7 @@ export const Route = createFileRoute("/api/party")({
         if (!me) return json({ ok: false, error: "auth" }, 403);
 
         if (action === "leave") {
-          room.members = room.members.filter((m) => m.id !== me.id && m.token !== me.token);
+          room.members = room.members.filter((m) => m.id !== me.id && m.token !== me.token && !(uid && m.id === uid));
           for (const m of room.members) m.host = m.id === room.hostId;
           await saveRoom(found.key, room);
           return json({ ok: true });

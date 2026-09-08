@@ -308,13 +308,18 @@ export function PartyWindow() {
       const room = joinedRef.current;
       const tok = tokenRef.current;
       if (!room || !tok) return;
-      const body = JSON.stringify({ action: "leave", room, token: tok, uid: userId(), nick: nickRef.current });
+      const body = JSON.stringify({
+        action: "beat",
+        room,
+        token: tok,
+        uid: userId(),
+        nick: nickRef.current,
+      });
       try {
         navigator.sendBeacon("/api/party", new Blob([body], { type: "application/json" }));
       } catch {
         void fetch("/api/party", { method: "POST", headers: { "Content-Type": "application/json" }, body, keepalive: true });
       }
-      clearSession();
     };
     window.addEventListener("pagehide", bye);
     return () => window.removeEventListener("pagehide", bye);
@@ -667,6 +672,15 @@ export function PartyWindow() {
     );
   };
 
+  const lockMate = (m: Member) => {
+    const lng = Number(m.lng);
+    const lat = Number(m.lat);
+    if (!Number.isFinite(lng) || !Number.isFinite(lat)) return;
+    const s = useMapStore.getState();
+    s.setPartyCollapsed(true);
+    s.requestFlyTo({ lng, lat, bearing: 0, pitch: 0.55 });
+  };
+
   const stopShare = async () => {
     if (!joined || !token) return;
     const { res, data } = await partyPost({
@@ -777,10 +791,15 @@ export function PartyWindow() {
                   const label = m.near ? `（${t.partyNear.replace("{n}", m.near)}）` : "";
                   return (
                     <div key={`pin-${m.id}`} className="flex items-center justify-between gap-2 rounded-[var(--radius-sm)] bg-fg/8 px-2 py-1.5 text-xs text-fg">
-                      <span className="min-w-0 truncate">
+                      <button
+                        type="button"
+                        className={`min-w-0 flex-1 truncate text-left ${has ? "" : "opacity-60"}`}
+                        disabled={!has}
+                        onClick={() => lockMate(m)}
+                      >
                         <span className="font-medium">{m.nick}</span>
                         {has ? <span className="ml-1 text-fg-muted">{label}</span> : <span className="ml-1 text-fg-muted">{t.partyNoPin}</span>}
-                      </span>
+                      </button>
                       {mine && has ? (
                         <button type="button" className="shrink-0 text-fg-muted" onClick={() => void stopShare()}>
                           {t.partyUnshare}

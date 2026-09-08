@@ -16,7 +16,7 @@ const CAP_MS = 7 * DAY_MS;
 const GONE_MS = 20 * 60 * 1000;
 const FILE = join(process.cwd(), ".data", "party-rooms.json");
 
-type Member = { id: string; nick: string; token: string; last: number; online: boolean; host?: boolean };
+type Member = { id: string; nick: string; token: string; last: number; online: boolean; host?: boolean; lng?: number; lat?: number; pinAt?: number; near?: string };
 type Msg = { id: number; nick: string; body: string; at: string; uid?: string };
 type Room = { name: string; pass: string; hostId: string; members: Member[]; messages: Msg[]; msgId: number; msgTotal: number; expiresAt: number };
 type Saved = Room & { key: string };
@@ -109,6 +109,10 @@ function asMember(raw: Partial<Member> & { uid?: string }): Member | null {
     last: Number(raw.last) || 0,
     online: raw.online !== false,
     host: Boolean(raw.host),
+    lng: Number.isFinite(Number(raw.lng)) ? Number(raw.lng) : undefined,
+    lat: Number.isFinite(Number(raw.lat)) ? Number(raw.lat) : undefined,
+    pinAt: Number(raw.pinAt) || undefined,
+    near: String(raw.near ?? "").trim().slice(0, 20) || undefined,
   };
 }
 
@@ -153,6 +157,12 @@ function mergeRoom(key: string, incoming: Room) {
         have.online = m.online;
       }
       have.id = have.id || m.id;
+      if ((m.pinAt || 0) >= (have.pinAt || 0) && Number.isFinite(m.lng) && Number.isFinite(m.lat)) {
+        have.lng = m.lng;
+        have.lat = m.lat;
+        have.pinAt = m.pinAt;
+        if (m.near) have.near = m.near;
+      }
     } else if (cur.members.length < PARTY_MAX) {
       cur.members.push(m);
     }
@@ -455,6 +465,9 @@ function publicOf(room: Room, touchId?: string, was = "") {
       nick: m.nick,
       online: Boolean(m.online && Date.now() - m.last <= AWAY_MS),
       host: m.id === room.hostId,
+      ...(Number.isFinite(m.lng) && Number.isFinite(m.lat)
+        ? { lng: m.lng, lat: m.lat, pinAt: m.pinAt, near: m.near }
+        : {}),
     })),
     messages: room.messages.slice(-MSG_MAX),
     seats: PARTY_MAX,
@@ -615,6 +628,9 @@ export const Route = createFileRoute("/api/party")({
           uid?: string;
           text?: string;
           was?: string;
+          lng?: string | number;
+          lat?: string | number;
+          near?: string;
         } = {};
         try {
           body = (await request.json()) as typeof body;
@@ -706,6 +722,39 @@ export const Route = createFileRoute("/api/party")({
           });
           trimMessages(room);
           bumpTtl(room);
+          await saveRoom(found.key, room);
+          return json({ ok: true, ...publicOf(room, me.id, was), you: me.nick, youId: me.id, host: me.id === room.hostId });
+        }
+        if (action === "share") {
+          const lng = Number(body.lng);
+          const lat = Number(body.lat);
+          if (!Number.isFinite(lng) || !Number.isFinite(lat) || Math.abs(lng) > 180 || Math.abs(lat) > 90) {
+            return json({ ok: false, error: "need" }, 400);
+          }
+          me.lng = lng;
+          me.lat = lat;
+          me.pinAt = Date.now();
+          me.near = String(body.near ?? "").trim().slice(0, 20) || undefined;
+          const line = String(body.text ?? "").trim().slice(0, 160);
+          if (line) {
+            room.messages.push({
+              id: room.msgId++,
+              nick: me.nick,
+              body: line,
+              at: new Date().toISOString(),
+              uid: me.id,
+            });
+            trimMessages(room);
+            bumpTtl(room);
+          }
+          await saveRoom(found.key, room);
+          return json({ ok: true, ...publicOf(room, me.id, was), you: me.nick, youId: me.id, host: me.id === room.hostId });
+        }
+        if (action === "unshare") {
+          me.lng = undefined;
+          me.lat = undefined;
+          me.near = undefined;
+          me.pinAt = undefined;
           await saveRoom(found.key, room);
           return json({ ok: true, ...publicOf(room, me.id, was), you: me.nick, youId: me.id, host: me.id === room.hostId });
         }

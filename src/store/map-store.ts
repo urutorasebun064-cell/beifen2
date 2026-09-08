@@ -88,6 +88,8 @@ type MapStore = {
   setStayMenuOpen: (on: boolean) => void;
   partyMenuOpen: boolean;
   setPartyMenuOpen: (on: boolean) => void;
+  partyPins: { id: string; nick: string; lng: number; lat: number; station?: string }[];
+  setPartyPins: (pins: { id: string; nick: string; lng: number; lat: number; station?: string }[]) => void;
   stayScreen: { x: number; y: number } | null;
   setStayScreen: (pos: { x: number; y: number } | null) => void;
   stayWalk: boolean;
@@ -276,6 +278,8 @@ export const useMapStore = create<MapStore>((set, get) => ({
   setStayMenuOpen: (stayMenuOpen) => set({ stayMenuOpen }),
   partyMenuOpen: false,
   setPartyMenuOpen: (partyMenuOpen) => set({ partyMenuOpen }),
+  partyPins: [],
+  setPartyPins: (partyPins) => set({ partyPins }),
   stayScreen: null,
   setStayScreen: (stayScreen) => set({ stayScreen }),
   stayWalk: false,

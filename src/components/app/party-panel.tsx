@@ -1,12 +1,13 @@
 import { Component, FormEvent, useEffect, useRef, useState, type ReactNode } from "react";
-import { X } from "lucide-react";
+import { ChevronDown, ChevronUp, X } from "lucide-react";
 import { copies } from "@/lib/i18n";
 import { hanFold } from "@/lib/han";
+import { isInJapan, stationsNearPlace } from "@/lib/rail/geo";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useMapStore } from "@/store/map-store";
 
-type Member = { id: string; nick: string; online?: boolean; host?: boolean };
+type Member = { id: string; nick: string; online?: boolean; host?: boolean; lng?: number; lat?: number; pinAt?: number; near?: string };
 type Msg = { id: number; nick: string; body: string; at: string; uid?: string };
 type RoomState = { name: string; members: Member[]; messages: Msg[]; seats: number; you?: string; youId?: string; host?: boolean; hostId?: string; expiresAt?: number };
 
@@ -87,7 +88,7 @@ function nickOf(lang: "ja" | "zh" | "en") {
   return lang === "zh" ? "旅人" : lang === "en" ? "Traveler" : "ゲスト";
 }
 
-type Session = { room: string; token: string; nick: string; open?: boolean };
+type Session = { room: string; token: string; nick: string; open?: boolean; pass?: string };
 
 function readStore(store: Storage): Session | null {
   try {
@@ -100,6 +101,7 @@ function readStore(store: Storage): Session | null {
       token: String(v.token),
       nick: String(v.nick ?? ""),
       open: Boolean(v.open),
+      pass: String(v.pass ?? ""),
     };
   } catch {
     return null;
@@ -144,6 +146,35 @@ function clearSession() {
   }
   try {
     localStorage.removeItem("jb-party-session");
+  } catch {
+    /* */
+  }
+}
+
+function loadLast(): { room: string; pass: string } | null {
+  for (const store of [sessionStorage, localStorage]) {
+    try {
+      const raw = store.getItem("jb-party-last");
+      if (!raw) continue;
+      const v = JSON.parse(raw) as { room?: string; pass?: string };
+      if (!v.room) continue;
+      return { room: String(v.room).slice(0, 20), pass: String(v.pass ?? "").slice(0, 32) };
+    } catch {
+      /* */
+    }
+  }
+  return null;
+}
+
+function saveLast(room: string, pass: string) {
+  const raw = JSON.stringify({ room, pass });
+  try {
+    sessionStorage.setItem("jb-party-last", raw);
+  } catch {
+    /* */
+  }
+  try {
+    localStorage.setItem("jb-party-last", raw);
   } catch {
     /* */
   }
@@ -211,6 +242,8 @@ export function PartyWindow() {
   const [listed, setListed] = useState<{ name: string; n: number; seats: number }[]>([]);
   const [pending, setPending] = useState<Msg[]>([]);
   const [state, setState] = useState<RoomState | null>(null);
+  const [sharing, setSharing] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
   const logRef = useRef<HTMLDivElement>(null);
   const stickRef = useRef(true);
   const passRef = useRef(pass);
@@ -224,9 +257,16 @@ export function PartyWindow() {
 
   useEffect(() => {
     const saved = loadSession();
-    if (!saved) return;
-    setRoom(saved.room);
-    if (saved.nick) setNick(saved.nick);
+    if (saved) {
+      setRoom(saved.room);
+      if (saved.nick) setNick(saved.nick);
+      if (saved.pass) setPass(saved.pass);
+      return;
+    }
+    const last = loadLast();
+    if (!last) return;
+    setRoom(last.room);
+    if (last.pass) setPass(last.pass);
   }, []);
 
   useEffect(() => {
@@ -255,6 +295,7 @@ export function PartyWindow() {
     setToken(saved.token);
     setRoom(saved.room);
     if (saved.nick) setNick(saved.nick);
+    if (saved.pass) setPass(saved.pass);
   }, [open]);
 
   useEffect(() => {
@@ -298,6 +339,7 @@ export function PartyWindow() {
         token: data.token,
         nick: who,
         open: useMapStore.getState().partyMenuOpen,
+        pass: passRef.current,
       });
       setToken(data.token);
       setJoined(data.name || joinedRef.current);
@@ -367,8 +409,18 @@ export function PartyWindow() {
     }
     const saved = loadSession();
     if (!saved?.token) return;
-    saveSession({ ...saved, open });
+    saveSession({ ...saved, open, pass: passRef.current || saved.pass });
   }, [open]);
+
+  useEffect(() => {
+    const rows = (state?.members ?? []).flatMap((m) => {
+      const lng = Number(m.lng);
+      const lat = Number(m.lat);
+      if (!Number.isFinite(lng) || !Number.isFinite(lat) || !isInJapan(lng, lat)) return [];
+      return [{ id: m.id, nick: m.nick, lng, lat, station: m.near }];
+    });
+    useMapStore.getState().setPartyPins(rows);
+  }, [state?.members]);
 
   if (!open) return null;
 
@@ -405,11 +457,13 @@ export function PartyWindow() {
       }
       const who = nick.trim() || nickOf(lang);
       const roomName = data.name || room.trim();
-      saveSession({ room: roomName, token: data.token, nick: who, open: true });
+      saveSession({ room: roomName, token: data.token, nick: who, open: true, pass: passRef.current });
+      saveLast(roomName, passRef.current);
       setNick(who);
       setToken(data.token);
       setJoined(roomName);
       setState(data);
+      setCollapsed(false);
     } finally {
       setBusy(false);
     }
@@ -442,6 +496,7 @@ export function PartyWindow() {
             token: again.data.token,
             nick: who,
             open: true,
+            pass: passRef.current,
           });
           setToken(again.data.token);
           ({ res, data } = await ship(again.data.token));
@@ -472,6 +527,7 @@ export function PartyWindow() {
         token,
         nick: nickRef.current || nick,
         open: false,
+        pass: passRef.current,
       });
     }
     useMapStore.getState().setPartyMenuOpen(false);
@@ -479,14 +535,14 @@ export function PartyWindow() {
 
   const leave = () => {
     if (joined && token) void partyPost({ action: "leave", room: joined, token, nick: nickRef.current || nick });
+    saveLast(joined || room, passRef.current);
     clearSession();
     setJoined("");
     setToken("");
-    setRoom("");
-    setPass("");
     setState(null);
     setPending([]);
-    useMapStore.getState().setPartyMenuOpen(false);
+    setCollapsed(false);
+    useMapStore.getState().setPartyPins([]);
   };
 
   const hostAct = async (action: "clear" | "sweep" | "disband") => {
@@ -494,16 +550,76 @@ export function PartyWindow() {
     const { res, data } = await partyPost({ action, room: joined, token, nick: nickRef.current || nick });
     if (!res.ok || !data.ok) return;
     if (data.gone || action === "disband") {
+      saveLast(joined || room, passRef.current);
       clearSession();
       setJoined("");
       setToken("");
       setState(null);
       setPending([]);
-      useMapStore.getState().setPartyMenuOpen(false);
+      setCollapsed(false);
+      useMapStore.getState().setPartyPins([]);
       return;
     }
     setState(data);
     setPending([]);
+  };
+
+  const shareLoc = () => {
+    if (!joined || !token || sharing) return;
+    if (!navigator.geolocation) {
+      setErr(t.partyShareFail);
+      return;
+    }
+    setSharing(true);
+    setErr("");
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const lng = pos.coords.longitude;
+        const lat = pos.coords.latitude;
+        if (isInJapan(lng, lat)) useMapStore.getState().setUserLocation({ lng, lat }, "ok");
+        const near = stationsNearPlace(useMapStore.getState().stationIndex, lng, lat, 1)[0]?.station.name ?? "";
+        const line = near ? `（${t.partyNear.replace("{n}", near)}）` : "";
+        void (async () => {
+          try {
+            const { res, data } = await partyPost({
+              action: "share",
+              room: joinedRef.current,
+              token: tokenRef.current,
+              nick: nickRef.current || nick,
+              lng: String(lng),
+              lat: String(lat),
+              near,
+              text: line,
+            });
+            if (res.ok && data.ok) {
+              setState(data);
+              setCollapsed(true);
+              if (isInJapan(lng, lat)) {
+                useMapStore.getState().requestFlyTo({ lng, lat, zoom: 14.2, bearing: 0, pitch: 0.55, center: true });
+              }
+            }
+          } finally {
+            setSharing(false);
+          }
+        })();
+      },
+      () => {
+        setSharing(false);
+        setErr(t.partyShareFail);
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 8000 },
+    );
+  };
+
+  const stopShare = async () => {
+    if (!joined || !token) return;
+    const { res, data } = await partyPost({
+      action: "unshare",
+      room: joinedRef.current,
+      token: tokenRef.current,
+      nick: nickRef.current || nick,
+    });
+    if (res.ok && data.ok) setState(data);
   };
 
   const you = state?.you || nick;
@@ -522,6 +638,35 @@ export function PartyWindow() {
     ...(state?.messages ?? []),
     ...pending.filter((p) => !(state?.messages ?? []).some((m) => m.body === p.body && (m.uid === meId || m.nick === p.nick))),
   ];
+  const sharingMe = members.some((m) => m.id === meId && Number.isFinite(m.lng) && Number.isFinite(m.lat));
+
+  if (joined && collapsed) {
+    return (
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-40 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+        <div className="pointer-events-auto rpg-frame relative mx-auto flex w-full max-w-md items-center justify-center px-3 py-2">
+          <button
+            type="button"
+            className="flex items-center justify-center py-1 text-fg-muted"
+            aria-label={t.panelOpen}
+            onClick={() => setCollapsed(false)}
+          >
+            <ChevronUp className="size-5" />
+          </button>
+          <button
+            type="button"
+            className="absolute top-1.5 right-2 rounded-full p-1.5 text-fg-muted"
+            aria-label={t.close}
+            onClick={leave}
+          >
+            <X className="size-4" />
+          </button>
+          <button type="button" className="absolute inset-x-10 truncate px-2 text-center text-sm text-fg" onClick={() => setCollapsed(false)}>
+            {t.partyParty} · {joined}
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="absolute inset-0 z-40 flex items-end justify-center bg-bg/50 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] md:items-center">
@@ -546,14 +691,26 @@ export function PartyWindow() {
               t.partyMenu
             )}
           </p>
-          <button
-            type="button"
-            className="shrink-0 rounded-full p-1 text-fg-muted"
-            onClick={joined ? leave : hide}
-            aria-label={t.close}
-          >
-            <X className="size-4" />
-          </button>
+          <div className="flex shrink-0 items-center gap-0.5">
+            {joined ? (
+              <button
+                type="button"
+                className="rounded-full p-1 text-fg-muted"
+                onClick={() => setCollapsed(true)}
+                aria-label={t.panelClose}
+              >
+                <ChevronDown className="size-4" />
+              </button>
+            ) : null}
+            <button
+              type="button"
+              className="rounded-full p-1 text-fg-muted"
+              onClick={joined ? leave : hide}
+              aria-label={t.close}
+            >
+              <X className="size-4" />
+            </button>
+          </div>
         </div>
 
         {joined ? (
@@ -576,6 +733,29 @@ export function PartyWindow() {
                       ) : (
                         <span className="font-medium text-fg-muted">{t.partySlot}</span>
                       )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+            <div className="border-b border-border px-3 py-2">
+              <p className="mb-1.5 text-[11px] font-medium text-fg-muted">{t.partyPins}</p>
+              <div className="flex max-h-28 flex-col gap-1 overflow-y-auto">
+                {members.map((m) => {
+                  const has = Number.isFinite(m.lng) && Number.isFinite(m.lat);
+                  const mine = m.id === meId;
+                  const label = m.near ? `（${t.partyNear.replace("{n}", m.near)}）` : "";
+                  return (
+                    <div key={`pin-${m.id}`} className="flex items-center justify-between gap-2 rounded-[var(--radius-sm)] bg-fg/8 px-2 py-1.5 text-xs text-fg">
+                      <span className="min-w-0 truncate">
+                        <span className="font-medium">{m.nick}</span>
+                        {has ? <span className="ml-1 text-fg-muted">{label}</span> : <span className="ml-1 text-fg-muted">{t.partyNoPin}</span>}
+                      </span>
+                      {mine && has ? (
+                        <button type="button" className="shrink-0 text-fg-muted" onClick={() => void stopShare()}>
+                          {t.partyUnshare}
+                        </button>
+                      ) : null}
                     </div>
                   );
                 })}
@@ -615,6 +795,14 @@ export function PartyWindow() {
                   {t.partySend}
                 </Button>
               </div>
+              <button
+                type="button"
+                className="inline-flex min-h-10 w-full items-center justify-center rounded-[var(--radius-sm)] bg-fg/8 px-3 text-xs font-medium text-fg"
+                onClick={() => (sharingMe ? void stopShare() : shareLoc())}
+                disabled={sharing}
+              >
+                {sharing ? t.partySharing : sharingMe ? t.partyUnshare : t.partyShare}
+              </button>
               {err ? <p className="text-xs text-fg">{err}</p> : null}
               {isHost ? (
                 <div className="flex gap-3">
@@ -670,6 +858,8 @@ export function PartyWindow() {
                     onClick={() => {
                       setRoom(row.name);
                       setMode("join");
+                      const last = loadLast();
+                      if (last && last.room === row.name && last.pass) setPass(last.pass);
                     }}
                   >
                     {row.name}

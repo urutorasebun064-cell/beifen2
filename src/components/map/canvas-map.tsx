@@ -4120,6 +4120,37 @@ export function CanvasMap() {
           }
         }
 
+        const partyPins = useMapStore.getState().partyPins;
+        for (const pin of partyPins) {
+          const [px, py] = project(pin.lng, pin.lat, camRef.current, w, h);
+          if (!Number.isFinite(px) || !Number.isFinite(py)) continue;
+          const pulse = 0.7 + 0.3 * Math.sin(ts / 240);
+          ctx.fillStyle = `rgba(255, 214, 110, ${0.16 + 0.18 * pulse})`;
+          ctx.beginPath();
+          ctx.arc(px, py, 22 * pulse, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = `rgba(255, 214, 110, ${0.55 + 0.35 * pulse})`;
+          ctx.lineWidth = 2.4;
+          ctx.beginPath();
+          ctx.arc(px, py, 12 + 7 * pulse, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.fillStyle = "#ffe08a";
+          ctx.beginPath();
+          ctx.arc(px, py, 5.2, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = "#0a2018";
+          ctx.lineWidth = 1.3;
+          ctx.stroke();
+          const label = pin.station ? `${pin.nick}（${pin.station}）` : pin.nick;
+          ctx.font = mapFont(11, 700);
+          ctx.textAlign = "center";
+          ctx.textBaseline = "bottom";
+          ctx.fillStyle = "#0a2018";
+          ctx.fillText(label, px, py - 16);
+          ctx.fillStyle = "#fff6d8";
+          ctx.fillText(label, px, py - 17);
+        }
+
         const nearest = useMapStore.getState().journey ? [] : useMapStore.getState().nearestStations;
         const nearLang = useMapStore.getState().lang;
         const tNear = copies[nearLang];

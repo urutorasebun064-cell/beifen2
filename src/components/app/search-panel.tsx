@@ -327,8 +327,15 @@ export async function applyTrip(origin: StationHit | { lng: number; lat: number 
   };
   try {
     if (oName) {
-      const due = (j: Journey) => departDue(j.departHhmm, tokyoParts(simNow()).minutes) >= 0;
-      let yahoo = await pullYahoo("1");
+      const nowMin = tokyoParts(simNow()).minutes;
+      const due = (j: Journey) => {
+        const dep = departDue(j.departHhmm, nowMin) + Math.max(0, j.delayMin ?? 0);
+        if (dep >= -1) return true;
+        const arr = departDue(j.arriveHhmm, nowMin);
+        return arr > 0 && dep > -25;
+      };
+      const clock = tokyoParts(simNow());
+      let yahoo = await pullYahoo("1", clock.hour, clock.minute);
       let live = yahoo.filter(due);
       if (!live.length) {
         const last = await pullYahoo("2");
@@ -343,7 +350,12 @@ export async function applyTrip(origin: StationHit | { lng: number; lat: number 
     }
   } finally {
     const nowMin = tokyoParts(simNow()).minutes;
-    const stillDue = (j: Journey) => departDue(j.departHhmm, nowMin) >= 0;
+    const stillDue = (j: Journey) => {
+      const dep = departDue(j.departHhmm, nowMin) + Math.max(0, j.delayMin ?? 0);
+      if (dep >= -1) return true;
+      const arr = departDue(j.arriveHhmm, nowMin);
+      return arr > 0 && dep > -25;
+    };
     const yahooAll = journeys.filter((j) => j.source === "yahoo");
     let live: Journey[] = yahooAll.filter(stillDue);
     if (!live.length) live = yahooAll;
@@ -354,7 +366,7 @@ export async function applyTrip(origin: StationHit | { lng: number; lat: number 
       return;
     }
     const shown = live.slice(0, 10).map((j) => stampJourneyDelay(j, store.liveTrains));
-    const keep = shown.filter((j) => departDue(j.departHhmm, nowMin) >= 0);
+    const keep = shown.filter(stillDue);
     const final = keep.length ? keep : shown;
     if (!final.length) {
       store.setJourneys([]);

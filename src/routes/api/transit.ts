@@ -4,6 +4,7 @@ import { journeysFromYahoo, fetchYahooDiaInfo, stampYahooDia } from "@/lib/rail/
 import type { Journey, RouteStop } from "@/lib/rail/types";
 
 const cache = new Map<string, { at: number; journey: unknown; journeys: unknown }>();
+const LAST_RUN = 80;
 
 function ymdTokyo(at = new Date()) {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit", day: "2-digit" }).format(at);
@@ -13,6 +14,26 @@ function yahooName(name: string, pf: string) {
   const n = name.replace(/駅$/u, "").trim();
   const p = pf.trim();
   return p ? `${n}(${p})` : n;
+}
+
+function parseHhmm(s: string | undefined) {
+  const m = String(s ?? "").match(/(\d{1,2}):(\d{2})/);
+  if (!m) return null;
+  return { hh: Number(m[1]), mm: Number(m[2]) };
+}
+
+function bumpMinute(hh: number, mm: number, add = 1) {
+  let h = hh;
+  let m = mm + add;
+  while (m >= 60) {
+    m -= 60;
+    h += 1;
+  }
+  return { hh: h, mm: m };
+}
+
+function jid(j: Journey) {
+  return `${j.departHhmm}|${j.arriveHhmm}|${j.legs.map((l) => l.lineName ?? l.kind).join(",")}`;
 }
 
 async function yahooPage(
@@ -74,11 +95,22 @@ export const Route = createFileRoute("/api/transit")({
         const clock = tokyoParts();
         const rawType = url.searchParams.get("type") ?? "1";
         const type = rawType === "4" || rawType === "3" || rawType === "2" ? rawType : "1";
-        const hh = type === "1" ? clock.hour : Number(url.searchParams.get("hh") ?? clock.hour);
-        const mm = type === "1" ? clock.minute : Number(url.searchParams.get("mm") ?? clock.minute);
-        const qmin = hh * 60 + mm;
+        const hhIn = url.searchParams.get("hh");
+        const mmIn = url.searchParams.get("mm");
+        let hh = hhIn != null && hhIn !== "" ? Number(hhIn) : clock.hour;
+        let mm = mmIn != null && mmIn !== "" ? Number(mmIn) : clock.minute;
+        if (!Number.isFinite(hh)) hh = clock.hour;
+        if (!Number.isFinite(mm)) mm = clock.minute;
+        const qmin = (hh % 24) * 60 + mm;
+        const early = clock.minutes < LAST_RUN;
         const tomorrow = clock.minutes >= 21 * 60 && (type === "3" || qmin < 6 * 60);
-        const [y, mo, d] = ymdTokyo(tomorrow ? new Date(Date.now() + 12 * 3600 * 1000) : new Date()).split("-");
+        let at = Date.now();
+        if (tomorrow) at += 12 * 3600 * 1000;
+        else if (early && type !== "3") {
+          at -= 12 * 3600 * 1000;
+          if (hh < 12) hh += 24;
+        }
+        const [y, mo, d] = ymdTokyo(new Date(at)).split("-");
         const fromQ = yahooName(from, opf);
         const toQ = yahooName(to, dpf);
         const cacheId = `${fromQ}|${toQ}|${y}-${mo}-${d}|${olat.toFixed(3)}|${dlat.toFixed(3)}|${type}|${hh}:${String(mm).padStart(2, "0")}`;
@@ -88,7 +120,23 @@ export const Route = createFileRoute("/api/transit")({
         const dest: RouteStop = { name: to, lng: dlng, lat: dlat, prefecture: dpf };
         try {
           const diaP = fetchYahooDiaInfo();
-          const first = await yahooPage(fromQ, toQ, y ?? "", mo ?? "", d ?? "", hh, mm, type, origin, dest);
+          let first = await yahooPage(fromQ, toQ, y ?? "", mo ?? "", d ?? "", hh, mm, type, origin, dest);
+          if (type === "1" && first.length) {
+            const last = parseHhmm(first[first.length - 1]?.departHhmm);
+            if (last) {
+              const n = bumpMinute(last.hh, last.mm, 1);
+              const extra = await yahooPage(fromQ, toQ, y ?? "", mo ?? "", d ?? "", n.hh, n.mm, "1", origin, dest);
+              if (extra.length) {
+                const seen = new Set(first.map(jid));
+                for (const j of extra) {
+                  const id = jid(j);
+                  if (seen.has(id)) continue;
+                  seen.add(id);
+                  first.push(j);
+                }
+              }
+            }
+          }
           const dia = await diaP.catch(() => []);
           const journeys = first.map((j) => stampYahooDia(j, dia));
           cache.set(cacheId, { at: Date.now(), journey: journeys[0], journeys });

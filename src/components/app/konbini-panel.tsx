@@ -69,15 +69,36 @@ function shopUid() {
   }
 }
 
-function nickOf() {
+function shopNickMap(): Record<string, string> {
   try {
-    const hit = sessionStorage.getItem("jb-nick");
-    if (hit) return hit;
-    const n = `ゲスト${Math.floor(1000 + Math.random() * 9000)}`;
-    sessionStorage.setItem("jb-nick", n);
-    return n;
+    const raw = localStorage.getItem("jb-shop-nicks");
+    const v = raw ? (JSON.parse(raw) as unknown) : {};
+    if (!v || typeof v !== "object") return {};
+    const out: Record<string, string> = {};
+    for (const [k, n] of Object.entries(v as Record<string, unknown>)) {
+      const name = String(n ?? "").trim().slice(0, 16);
+      if (k && name && !["ゲスト", "旅人", "Traveler"].includes(name) && !/^ゲスト\d+$/u.test(name)) out[k] = name;
+    }
+    return out;
   } catch {
-    return "ゲスト";
+    return {};
+  }
+}
+
+function shopNickOf(storeId: string) {
+  const map = shopNickMap();
+  return map[storeId] || "";
+}
+
+function rememberShopNick(storeId: string, nick: string) {
+  const name = nick.trim().slice(0, 16);
+  if (!storeId || !name || ["ゲスト", "旅人", "Traveler"].includes(name) || /^ゲスト\d+$/u.test(name)) return;
+  try {
+    const map = shopNickMap();
+    map[storeId] = name;
+    localStorage.setItem("jb-shop-nicks", JSON.stringify(map));
+  } catch {
+    /* */
   }
 }
 
@@ -100,7 +121,7 @@ export function ShopChat({
   const t = copies[lang];
   const loc = useMapStore((s) => s.userLocation);
   const gpsOk = useMapStore((s) => s.locateStatus) === "ok";
-  const [nick, setNick] = useState(nickOf);
+  const [nick, setNick] = useState(() => shopNickOf(storeId));
   const [text, setText] = useState("");
   const [rows, setRows] = useState<ChatMsg[]>([]);
   const [people, setPeople] = useState<ChatPerson[]>([]);
@@ -109,6 +130,11 @@ export function ShopChat({
   const nickRef = useRef(nick);
   nickRef.current = nick;
   const inside = insideKonbiniFence({ lng, lat }, loc);
+
+  useEffect(() => {
+    setNick(shopNickOf(storeId));
+    setErr("");
+  }, [storeId]);
 
   const apply = (data: { messages?: ChatMsg[]; members?: ChatPerson[] }) => {
     if (Array.isArray(data.messages)) setRows(data.messages.slice(-30));
@@ -123,7 +149,7 @@ export function ShopChat({
       body: JSON.stringify({
         action,
         store: storeId,
-        nick: nickRef.current.trim().slice(0, 16) || nickOf(),
+        nick: nickRef.current.trim().slice(0, 16),
         text: body,
         uid: shopUid(),
         lng: here?.lng,
@@ -144,6 +170,16 @@ export function ShopChat({
           const data = (await res.json()) as { messages?: ChatMsg[]; members?: ChatPerson[]; error?: string };
           if (!live) return;
           if (res.status === 409) {
+            if (data.error === "nickkeep") {
+              const keep = String((data as { nick?: string }).nick || shopNickOf(storeId) || "").trim();
+              if (keep) {
+                setNick(keep);
+                nickRef.current = keep;
+                rememberShopNick(storeId, keep);
+              }
+              setErr(t.konbiniNickKeep.replace("{n}", keep || "—"));
+              return;
+            }
             setErr(t.konbiniNickTaken);
             return;
           }
@@ -188,6 +224,11 @@ export function ShopChat({
     }
     const body = text.trim();
     if (!body) return;
+    const name = nick.trim();
+    if (!name) {
+      setErr(t.konbiniNeedNick);
+      return;
+    }
     setBusy(true);
     setErr("");
     try {
@@ -198,6 +239,16 @@ export function ShopChat({
         return;
       }
       if (res.status === 409) {
+        if (data.error === "nickkeep") {
+          const keep = String((data as { nick?: string }).nick || shopNickOf(storeId) || "").trim();
+          if (keep) {
+            setNick(keep);
+            nickRef.current = keep;
+            rememberShopNick(storeId, keep);
+          }
+          setErr(t.konbiniNickKeep.replace("{n}", keep || "—"));
+          return;
+        }
         setErr(t.konbiniNickTaken);
         return;
       }
@@ -206,11 +257,7 @@ export function ShopChat({
         return;
       }
       setText("");
-      try {
-        sessionStorage.setItem("jb-nick", nick);
-      } catch {
-        /* */
-      }
+      rememberShopNick(storeId, nick);
       apply(data);
     } finally {
       setBusy(false);
@@ -250,11 +297,11 @@ export function ShopChat({
         <form onSubmit={(e) => void send(e)} className="flex flex-col gap-2 border-t border-border p-3">
           <label className="flex items-center gap-2 text-xs text-fg-muted">
             {t.konbiniNick}
-            <Input value={nick} onChange={(e) => setNick(e.target.value.slice(0, 16))} className="h-9" />
+            <Input value={nick} onChange={(e) => setNick(e.target.value.slice(0, 16))} className="h-9" placeholder="" />
           </label>
           <div className="flex gap-2">
             <Input value={text} onChange={(e) => setText(e.target.value.slice(0, 160))} disabled={!inside || !gpsOk} />
-            <Button type="submit" disabled={busy || !inside || !gpsOk || !text.trim()}>
+            <Button type="submit" disabled={busy || !inside || !gpsOk || !text.trim() || !nick.trim()}>
               {t.konbiniSend}
             </Button>
           </div>

@@ -36,7 +36,7 @@ export async function refreshRadarMeta(force = false) {
     if (data.ok && data.basetime && data.validtime) {
       if (meta && meta.basetime !== data.basetime) prevMeta = meta;
       meta = { basetime: data.basetime, validtime: data.validtime };
-      if (images.size > 480) {
+      if (images.size > 1600) {
         images.clear();
         tinted.clear();
       }
@@ -119,7 +119,12 @@ function requestTile(z: number, x: number, y: number, stamp: RadarMeta) {
   const img = new Image();
   img.crossOrigin = "anonymous";
   img.onload = () => images.set(key, img);
-  img.onerror = () => images.set(key, "fail");
+  img.onerror = () => {
+    images.set(key, "fail");
+    window.setTimeout(() => {
+      if (images.get(key) === "fail") images.delete(key);
+    }, 1600);
+  };
   img.src = `/api/radar?z=${z}&x=${x}&y=${y}&b=${stamp.basetime}&v=${stamp.validtime}`;
   return null;
 }
@@ -216,12 +221,16 @@ function paintLevel(
   const y0 = latToTile(Math.min(85, bounds.north + pad), z);
   const y1 = latToTile(Math.max(-85, bounds.south - pad), z);
   const maxN = 2 ** z;
-  let n = 0;
-  const cap = 140;
+  let asked = 0;
+  const cap = 220;
   for (let x = x0; x <= x1; x++) {
     for (let y = y0; y <= y1; y++) {
-      if (++n > cap) return;
       const tx = ((x % maxN) + maxN) % maxN;
+      const ready = peekTile(stamp, z, tx, y);
+      if (!ready && asked < cap) {
+        asked += 1;
+        requestTile(z, tx, y, stamp);
+      }
       const img = readyTile(z, tx, y, stamp);
       if (!img) continue;
       paintTile(g, z, x, y, img, hidden, project, alt);

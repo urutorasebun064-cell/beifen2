@@ -7,7 +7,7 @@ import { KONBINI_CHAT_M } from "@/lib/konbini";
 
 type Row = { id: number; nick: string; body: string; created_at: string; uid?: string };
 type Person = { id: string; nick: string; last: number };
-type Channel = { members: Person[]; messages: Row[]; msgId: number };
+type Channel = { members: Person[]; messages: Row[]; msgId: number; nicks: Record<string, string> };
 
 const MSG_MAX = 30;
 const LIVE_MS = 20 * 1000;
@@ -24,7 +24,7 @@ function fence(storeLng: number, storeLat: number, lng: number, lat: number) {
 
 function hydrate() {
   try {
-    const rows = JSON.parse(readFileSync(FILE, "utf8")) as { key: string; members: Person[]; messages: Row[]; msgId: number }[];
+    const rows = JSON.parse(readFileSync(FILE, "utf8")) as { key: string; members: Person[]; messages: Row[]; msgId: number; nicks?: Record<string, string> }[];
     if (!Array.isArray(rows)) return;
     for (const row of rows) {
       if (!row.key) continue;
@@ -32,6 +32,7 @@ function hydrate() {
         members: Array.isArray(row.members) ? row.members : [],
         messages: Array.isArray(row.messages) ? row.messages : [],
         msgId: Number(row.msgId) || 1,
+        nicks: row.nicks && typeof row.nicks === "object" ? row.nicks : {},
       };
       const cur = channels.get(row.key);
       if (!cur) {
@@ -46,6 +47,7 @@ function hydrate() {
       cur.members = [...by.values()];
       if (incoming.messages.length >= cur.messages.length) cur.messages = incoming.messages;
       cur.msgId = Math.max(cur.msgId, incoming.msgId);
+      cur.nicks = { ...incoming.nicks, ...cur.nicks };
     }
   } catch {
     /* first run */
@@ -67,9 +69,10 @@ function flush() {
 function roomOf(id: string) {
   let ch = channels.get(id);
   if (!ch) {
-    ch = { members: [], messages: [], msgId: 1 };
+    ch = { members: [], messages: [], msgId: 1, nicks: {} };
     channels.set(id, ch);
   }
+  if (!ch.nicks) ch.nicks = {};
   return ch;
 }
 
@@ -82,6 +85,10 @@ function pruneMembers(ch: Channel) {
 function dropIfEmpty(key: string, ch: Channel) {
   if (ch.members.length) return ch;
   ch.messages = [];
+  if (ch.nicks && Object.keys(ch.nicks).length) {
+    flush();
+    return ch;
+  }
   channels.delete(key);
   flush();
   return null;
@@ -151,7 +158,7 @@ export const Route = createFileRoute("/api/konbini/chat")({
           return Response.json(publicOf(live));
         }
 
-        if (!uid || !nick) return Response.json({ ok: false, error: "need" }, { status: 400 });
+        if (!uid) return Response.json({ ok: false, error: "need" }, { status: 400 });
         if (!fence(Number(body.storeLng), Number(body.storeLat), Number(body.lng), Number(body.lat))) {
           const ch = channels.get(store);
           if (ch) {
@@ -164,17 +171,27 @@ export const Route = createFileRoute("/api/konbini/chat")({
 
         const ch = roomOf(store);
         pruneMembers(ch);
-        if (nickTaken(ch, nick, uid)) return Response.json({ ok: false, error: "nick" }, { status: 409 });
+        const keep = (ch.nicks[uid] || "").trim();
+        if (action === "beat" && !nick) {
+          if (!keep) return Response.json(publicOf(ch));
+        }
+        const used = nick || keep;
+        if (!used) return Response.json({ ok: false, error: "need" }, { status: 400 });
+        if (keep && used && hanFold(keep) !== hanFold(used)) {
+          return Response.json({ ok: false, error: "nickkeep", nick: keep }, { status: 409 });
+        }
+        if (nickTaken(ch, used, uid)) return Response.json({ ok: false, error: "nick" }, { status: 409 });
         const now = Date.now();
         const mine = ch.members.find((m) => m.id === uid);
         if (mine) {
-          mine.nick = nick;
+          mine.nick = used;
           mine.last = now;
-        } else ch.members.push({ id: uid, nick, last: now });
+        } else ch.members.push({ id: uid, nick: used, last: now });
+        ch.nicks[uid] = used;
 
         if (action === "send") {
           if (!text) return Response.json({ ok: false, error: "missing" }, { status: 400 });
-          ch.messages.push({ id: ch.msgId++, nick, body: text, created_at: new Date().toISOString(), uid });
+          ch.messages.push({ id: ch.msgId++, nick: used, body: text, created_at: new Date().toISOString(), uid });
           if (ch.messages.length > MSG_MAX) ch.messages.splice(0, ch.messages.length - MSG_MAX);
         }
         flush();

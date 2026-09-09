@@ -3571,7 +3571,7 @@ export function CanvasMap() {
           const s = useMapStore.getState();
           const hideRing = Boolean(s.selectedTrain || s.journey || s.journeys.length || s.searching);
           const ringM = s.konbiniBrand ? konbiniRingM(loc, s.stationIndex, s.nearestStations) : undefined;
-          if (loc && !hideRing && camRef.current.zoom >= SHOW_ZOOM) pullRoads(loc.lng, loc.lat, camRef.current.zoom, ringM);
+          if (loc && !hideRing && camRef.current.zoom >= SHOW_ZOOM - 0.85) pullRoads(loc.lng, loc.lat, camRef.current.zoom, ringM);
         }
         {
           const s = useMapStore.getState();

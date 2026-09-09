@@ -10,7 +10,7 @@ const waiters = new Set<() => void>();
 let lastPull = "";
 const queue: Array<[number, number, number]> = [];
 let flying = 0;
-const MAX_FLY = 4;
+const MAX_FLY = 8;
 
 export function roadsEpoch() {
   return epoch;
@@ -70,7 +70,7 @@ function pump() {
         pngs.set(key, "fail");
         window.setTimeout(() => {
           if (pngs.get(key) === "fail") pngs.delete(key);
-        }, 8000);
+        }, 1800);
         flying -= 1;
         pump();
         return;
@@ -103,7 +103,10 @@ function cover(lng: number, lat: number, z: number, rad: number) {
   const cx = lngToTile(lng, z);
   const cy = latToTile(lat, z);
   for (let y = cy - rad; y <= cy + rad; y++) {
-    for (let x = cx - rad; x <= cx + rad; x++) requestPng(z, x, y);
+    for (let x = cx - rad; x <= cx + rad; x++) {
+      requestPng(z, x, y);
+      if (z > 14) requestPng(z - 1, x >> 1, y >> 1);
+    }
   }
 }
 
@@ -112,13 +115,14 @@ export function prefetchRoads(lng: number, lat: number) {
 }
 
 export function pullRoads(lng: number, lat: number, zoom: number, meters = RING_M) {
-  if (zoom < SHOW_ZOOM) return;
-  const z = dataZ(zoom);
+  if (zoom < SHOW_ZOOM - 0.9) return;
+  const z = dataZ(Math.max(SHOW_ZOOM, zoom));
   const rad = tileSpan(lat, z, meters);
   const id = `${z}/${lngToTile(lng, z)}/${latToTile(lat, z)}|${rad}`;
   if (id === lastPull) return;
   lastPull = id;
   cover(lng, lat, z, rad);
+  if (z > 14) cover(lng, lat, z - 1, Math.max(1, rad - 1));
 }
 
 function ringPx(
@@ -244,6 +248,7 @@ export function drawRoads(
     g.fill();
     g.globalCompositeOperation = "multiply";
     g.imageSmoothingEnabled = true;
+    g.imageSmoothingQuality = "high";
     drawPng(g, cam, origin, project, meters);
     g.globalCompositeOperation = "source-over";
   }

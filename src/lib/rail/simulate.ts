@@ -633,7 +633,7 @@ export function simulateTrains(
     }
     return trains;
   }
-  const pad = Math.max(0.02, (bounds.east - bounds.west) * 0.05);
+  const pad = Math.max(0.035, (bounds.east - bounds.west) * 0.14);
   const visible = lines.filter((l) => (l.kind === "shinkansen" || zoom >= 8.2 || l.totalKm >= 0.4) && (l.totalKm >= 0.15 || l.stops.length >= 2) && lineVisible(l, bounds, zoom));
   visible.sort((a, b) => {
     const pa = priorityIds?.has(a.id) ? 0 : 1;

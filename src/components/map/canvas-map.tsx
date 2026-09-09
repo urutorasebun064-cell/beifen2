@@ -1456,31 +1456,56 @@ function remainingJourneySegs(lines: LineRuntime[]) {
 }
 
 function addPoly(path: Path2D, pts: [number, number][], cam: Cam, w: number, h: number, minPx: number) {
-  const pad = 96;
+  const pad = Math.max(420, Math.max(w, h) * 0.7);
   const min2 = minPx * minPx;
   let pen = false;
+  let have = false;
   let lx = 0;
   let ly = 0;
+  let ox = 0;
+  let oy = 0;
   const last = pts.length - 1;
   for (let i = 0; i < pts.length; i++) {
     const [x, y] = project(pts[i]![0], pts[i]![1], cam, w, h);
-    if (!Number.isFinite(x) || !Number.isFinite(y) || x < -pad || y < -pad || x > w + pad || y > h + pad) {
+    if (!Number.isFinite(x) || !Number.isFinite(y)) {
       pen = false;
+      have = false;
       continue;
     }
-    if (!pen) {
-      path.moveTo(x, y);
-      pen = true;
+    const on = x >= -pad && y >= -pad && x <= w + pad && y <= h + pad;
+    if (on) {
+      if (!pen) {
+        if (have) {
+          path.moveTo(ox, oy);
+          path.lineTo(x, y);
+        } else {
+          path.moveTo(x, y);
+        }
+        pen = true;
+        lx = x;
+        ly = y;
+      } else {
+        const dx = x - lx;
+        const dy = y - ly;
+        if (i !== last && dx * dx + dy * dy < min2) {
+          ox = x;
+          oy = y;
+          have = true;
+          continue;
+        }
+        path.lineTo(x, y);
+        lx = x;
+        ly = y;
+      }
+    } else if (pen) {
+      path.lineTo(x, y);
+      pen = false;
       lx = x;
       ly = y;
-      continue;
     }
-    const dx = x - lx;
-    const dy = y - ly;
-    if (i !== last && dx * dx + dy * dy < min2) continue;
-    path.lineTo(x, y);
-    lx = x;
-    ly = y;
+    ox = x;
+    oy = y;
+    have = true;
   }
 }
 
@@ -3456,7 +3481,7 @@ export function CanvasMap() {
       const strokeLine = (line: LineRuntime, width: number, color: string) => {
         bg.strokeStyle = color;
         bg.lineWidth = Math.max(1.8, width);
-        const src = cam.zoom >= 14.6 ? line.path : line.drawPath.length >= 2 ? line.drawPath : line.path;
+        const src = cam.zoom >= 11.2 ? line.path : line.drawPath.length >= 2 ? line.drawPath : line.path;
         const path = new Path2D();
         addPoly(path, src, cam, w, h, cam.zoom >= 13.2 ? 1.6 : 2.8);
         bg.stroke(path);
@@ -3717,17 +3742,42 @@ export function CanvasMap() {
         const bounds =
           blend > 0.4
             ? (() => {
-                const c0 = unproject(0, 0, camRef.current, w, h);
-                const c1 = unproject(w, 0, camRef.current, w, h);
-                const c2 = unproject(0, h, camRef.current, w, h);
-                const c3 = unproject(w, h, camRef.current, w, h);
-                const lngs = [c0[0], c1[0], c2[0], c3[0]];
-                const lats = [c0[1], c1[1], c2[1], c3[1]];
+                const samples: Array<[number, number]> = [
+                  [0, 0],
+                  [w, 0],
+                  [0, h],
+                  [w, h],
+                  [w * 0.5, 0],
+                  [w * 0.5, h],
+                  [0, h * 0.5],
+                  [w, h * 0.5],
+                  [w * 0.5, h * 0.22],
+                  [w * 0.5, h * 0.78],
+                ];
+                const lngs: number[] = [];
+                const lats: number[] = [];
+                for (const [sx, sy] of samples) {
+                  const p = unproject(sx, sy, camRef.current, w, h);
+                  if (!Number.isFinite(p[0]) || !Number.isFinite(p[1])) continue;
+                  if (p[0] < 120 || p[0] > 155 || p[1] < 22 || p[1] > 48) continue;
+                  lngs.push(p[0]);
+                  lats.push(p[1]);
+                }
+                if (lngs.length < 2) {
+                  return {
+                    west: camRef.current.lng - span,
+                    east: camRef.current.lng + span,
+                    south: camRef.current.lat - span * 0.72,
+                    north: camRef.current.lat + span * 0.72,
+                  };
+                }
+                const padLng = Math.max(0.02, (Math.max(...lngs) - Math.min(...lngs)) * 0.32);
+                const padLat = Math.max(0.016, (Math.max(...lats) - Math.min(...lats)) * 0.32);
                 return {
-                  west: Math.min(...lngs) - 0.08,
-                  east: Math.max(...lngs) + 0.08,
-                  south: Math.min(...lats) - 0.08,
-                  north: Math.max(...lats) + 0.08,
+                  west: Math.min(...lngs) - padLng,
+                  east: Math.max(...lngs) + padLng,
+                  south: Math.min(...lats) - padLat,
+                  north: Math.max(...lats) + padLat,
                 };
               })()
             : {
@@ -3779,7 +3829,7 @@ export function CanvasMap() {
             trainsRef.current = liveRaw.filter((t) => t.kind === "flight");
           } else {
           const now = simNow();
-          const cap = z < 5.5 ? 0 : z >= 15.6 ? 2200 : z >= 13.8 ? 1600 : z >= 12 ? 1400 : z >= 10 ? 1100 : z >= 8 ? 800 : 420;
+          const cap = z < 5.5 ? 0 : z >= 15.2 ? 2800 : z >= 13.4 ? 2200 : z >= 12 ? 1800 : z >= 10 ? 1300 : z >= 8 ? 800 : 420;
           const liveRaw = useMapStore.getState().viewTime ? [] : useMapStore.getState().liveTrains;
           const flights = liveRaw.filter((t) => t.kind === "flight");
           const snap = flights;

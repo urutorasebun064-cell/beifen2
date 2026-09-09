@@ -1264,9 +1264,10 @@ export function SearchPanel() {
 }
 
 let headingWatch = false;
-const gpsHold = { lng: 0, lat: 0, acc: 9e9, t: 0, on: false };
+const gpsHold = { lng: 0, lat: 0, acc: 9e9, t: 0, on: false, move: 0 };
 let fineTimer = 0;
 let streetZoom = false;
+let lastFixAt = 0;
 
 export function noteStreetZoom(on: boolean) {
   streetZoom = on;
@@ -1284,30 +1285,52 @@ function blendGps(pos: GeolocationPosition) {
     gpsHold.acc = acc;
     gpsHold.t = t;
     gpsHold.on = true;
+    gpsHold.move = 0;
     return { lng, lat, acc };
   }
   const dt = Math.max(0.25, (t - gpsHold.t) / 1000);
   const d = haversine([gpsHold.lng, gpsHold.lat], [lng, lat]) * 1000;
-  if (d > 90 && d > acc * 1.8 && acc >= gpsHold.acc * 0.9 && dt < 20) {
+  const speed = d / dt;
+  if (speed > 130 && d > acc * 3) {
     gpsHold.t = t;
     return { lng: gpsHold.lng, lat: gpsHold.lat, acc: gpsHold.acc };
   }
-  if (acc > gpsHold.acc * 1.35 && acc > 16 && d < 70) {
+  const rolling = speed > 3.5 || d > 35;
+  gpsHold.move = rolling ? 8 : Math.max(0, gpsHold.move - 1);
+  if (!rolling && acc > gpsHold.acc * 1.6 && acc > 22 && d < 25) {
     gpsHold.t = t;
     return { lng: gpsHold.lng, lat: gpsHold.lat, acc: gpsHold.acc };
   }
-  const dead = Math.max(5, Math.min(acc, gpsHold.acc) * 0.4);
+  const dead = rolling ? 2 : Math.max(5, Math.min(acc, gpsHold.acc) * 0.4);
   if (d < dead) {
     gpsHold.acc = Math.min(gpsHold.acc, acc);
     gpsHold.t = t;
     return { lng: gpsHold.lng, lat: gpsHold.lat, acc: gpsHold.acc };
   }
-  const k = acc <= 12 ? 0.5 : acc <= 22 ? 0.32 : 0.18;
+  const k = rolling ? 0.78 : acc <= 12 ? 0.5 : acc <= 22 ? 0.32 : 0.2;
   gpsHold.lng += (lng - gpsHold.lng) * k;
   gpsHold.lat += (lat - gpsHold.lat) * k;
-  gpsHold.acc = gpsHold.acc * 0.55 + acc * 0.45;
+  gpsHold.acc = rolling ? acc : gpsHold.acc * 0.55 + acc * 0.45;
   gpsHold.t = t;
   return { lng: gpsHold.lng, lat: gpsHold.lat, acc: gpsHold.acc };
+}
+
+function pushFix(pos: GeolocationPosition) {
+  const hit = blendGps(pos);
+  if (!hit) return false;
+  let { lng, lat, acc } = hit;
+  if (acc > 28 && gpsHold.move <= 0) {
+    const snapped = snapToRoad(lng, lat, 16);
+    if (snapped) {
+      lng = snapped.lng;
+      lat = snapped.lat;
+      gpsHold.lng = lng;
+      gpsHold.lat = lat;
+    }
+  }
+  lastFixAt = Date.now();
+  useMapStore.getState().setUserLocation({ lng, lat }, "ok");
+  return true;
 }
 
 function armFineLocate() {
@@ -1315,25 +1338,17 @@ function armFineLocate() {
   fineTimer = window.setInterval(() => {
     if (document.visibilityState !== "visible") return;
     if (useMapStore.getState().locateStatus !== "ok") return;
-    if (!streetZoom && gpsHold.acc < 32) return;
+    const moving = gpsHold.move > 0;
+    const wait = moving ? 5000 : streetZoom ? 12000 : 20000;
+    if (Date.now() - lastFixAt < wait) return;
     navigator.geolocation.getCurrentPosition(
       (pos) => {
-        const hit = blendGps(pos);
-        if (!hit) return;
-        let { lng, lat, acc } = hit;
-        if (acc > 26) {
-          const snapped = snapToRoad(lng, lat, 16);
-          if (snapped) {
-            lng = snapped.lng;
-            lat = snapped.lat;
-          }
-        }
-        useMapStore.getState().setUserLocation({ lng, lat }, "ok");
+        pushFix(pos);
       },
       () => {},
-      { enableHighAccuracy: true, timeout: 12000, maximumAge: 4000 },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: moving ? 1500 : 6000 },
     );
-  }, 16000);
+  }, 4000);
 }
 
 function startHeading() {
@@ -1384,22 +1399,9 @@ export function locateUser(fly: boolean) {
     return;
   }
   const apply = (pos: GeolocationPosition) => {
-    const hit = blendGps(pos);
-    if (!hit) {
+    if (!pushFix(pos) && !isInJapan(pos.coords.longitude, pos.coords.latitude)) {
       useMapStore.getState().setUserLocation(NODA, "outside");
-      return;
     }
-    let { lng, lat, acc } = hit;
-    if (acc > 26) {
-      const snapped = snapToRoad(lng, lat, 16);
-      if (snapped) {
-        lng = snapped.lng;
-        lat = snapped.lat;
-        gpsHold.lng = lng;
-        gpsHold.lat = lat;
-      }
-    }
-    useMapStore.getState().setUserLocation({ lng, lat }, "ok");
   };
   navigator.geolocation.getCurrentPosition(
     (pos) => {

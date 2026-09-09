@@ -4242,7 +4242,8 @@ export function CanvasMap() {
             walk.lat = user.lat;
             walk.set = true;
           } else {
-            const k = camRef.current.zoom >= 14 ? 0.1 : camRef.current.zoom >= 12.6 ? 0.14 : 0.18;
+            const gap = haversine([walk.lng, walk.lat], [user.lng, user.lat]) * 1000;
+            const k = gap > 40 ? 0.82 : gap > 12 ? 0.4 : camRef.current.zoom >= 14 ? 0.12 : 0.18;
             walk.lng += (user.lng - walk.lng) * k;
             walk.lat += (user.lat - walk.lat) * k;
           }

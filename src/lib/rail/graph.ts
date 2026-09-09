@@ -309,8 +309,8 @@ export function sliceRailPath(
   from: { lng: number; lat: number; name?: string },
   to: { lng: number; lat: number; name?: string },
 ): [number, number][] {
-  let ia = from.name ? stopIndexByName(line, from.name) : -1;
-  let ib = to.name ? stopIndexByName(line, to.name) : -1;
+  let ia = from.name ? stopIndexByName(line, from.name, from) : -1;
+  let ib = to.name ? stopIndexByName(line, to.name, to) : -1;
   const nearestStop = (lng: number, lat: number) => {
     let best = 0;
     let bestD = Infinity;

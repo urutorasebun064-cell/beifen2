@@ -75,16 +75,20 @@ self.addEventListener("push", (event) => {
   event.waitUntil(
     (async () => {
       const list = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+      const visible = list.some((c) => c.visibilityState === "visible");
       list.forEach((c) => c.postMessage({ type: "party-alert" }));
       await self.registration.showNotification("J-Bmap", {
-        body: "",
+        body: "•",
         tag: "jb-party",
         icon: "/icon-192.png",
         badge: "/icon-192.png",
-        silent: true,
+        silent: visible,
+        renotify: !visible,
       });
-      const notes = await self.registration.getNotifications({ tag: "jb-party" });
-      notes.forEach((n) => n.close());
+      if (visible) {
+        const notes = await self.registration.getNotifications({ tag: "jb-party" });
+        notes.forEach((n) => n.close());
+      }
     })(),
   );
 });

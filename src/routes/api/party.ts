@@ -130,12 +130,13 @@ async function pingPush(room: Room, exceptId: string) {
     .map((m) =>
       wp
         .sendNotification({ endpoint: m.push!.endpoint, keys: { p256dh: m.push!.p256dh, auth: m.push!.auth } }, payload)
-        .catch(() => {
-          m.push = undefined;
+        .catch((err: { statusCode?: number }) => {
+          const code = Number(err?.statusCode);
+          if (code === 404 || code === 410) m.push = undefined;
         }),
     );
   if (!jobs.length) return;
-  await Promise.race([Promise.allSettled(jobs), new Promise((r) => setTimeout(r, 1600))]);
+  await Promise.race([Promise.allSettled(jobs), new Promise((r) => setTimeout(r, 8000))]);
 }
 
 function markGone(key: string) {
@@ -592,7 +593,11 @@ function collapseMembers(room: Room, keepId?: string) {
     if (score(m) >= score(prev)) {
       if (prev.id === room.hostId) room.hostId = m.id;
       m.token = m.token || prev.token;
+      m.push = m.push || prev.push;
       byTok.set(tok, m);
+    } else {
+      prev.token = prev.token || m.token;
+      prev.push = prev.push || m.push;
     }
   }
   room.members = [...byTok.values()];

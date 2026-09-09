@@ -455,6 +455,7 @@ export function PartyWindow() {
   const tokenRef = useRef(token);
   const lastHeardRef = useRef(0);
   const pushBoundRef = useRef("");
+  const vapidRef = useRef("");
   const shareOffRef = useRef(false);
   passRef.current = pass;
   nickRef.current = nick;
@@ -640,7 +641,8 @@ export function PartyWindow() {
             );
           }
           setState(data);
-          if (data.vapid && pushBoundRef.current !== tokenRef.current) {
+          if (data.vapid) vapidRef.current = data.vapid;
+          if (data.vapid) {
             void bindPush(roomName, tokenRef.current, data.vapid).then((ok) => {
               if (ok) pushBoundRef.current = tokenRef.current;
             });
@@ -684,6 +686,9 @@ export function PartyWindow() {
     const onShow = () => {
       arm();
       if (document.visibilityState === "visible") void pull();
+      else if (joinedRef.current && tokenRef.current && vapidRef.current) {
+        void bindPush(joinedRef.current, tokenRef.current, vapidRef.current);
+      }
     };
     document.addEventListener("visibilitychange", onShow);
     window.addEventListener("pageshow", onShow);
@@ -795,14 +800,16 @@ export function PartyWindow() {
       lastHeardRef.current = (data.messages ?? []).reduce((n, m) => Math.max(n, m.id || 0), 0);
       unlockPing();
       try {
-        if ("Notification" in window && Notification.permission === "default") void Notification.requestPermission();
+        if ("Notification" in window && Notification.permission === "default") {
+          await Notification.requestPermission();
+        }
       } catch {
         /* */
       }
       if (data.vapid) {
-        void bindPush(joinedName, data.token, data.vapid).then((ok) => {
-          if (ok) pushBoundRef.current = data.token;
-        });
+        vapidRef.current = data.vapid;
+        const ok = await bindPush(joinedName, data.token, data.vapid);
+        if (ok) pushBoundRef.current = data.token;
       }
       clearPartyBadge();
       useMapStore.getState().setPartyInRoom(true);

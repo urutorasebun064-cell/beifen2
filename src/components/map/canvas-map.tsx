@@ -1158,20 +1158,14 @@ function stopIdx(line: LineRuntime, name: string) {
   if (!n) return -1;
   const exact = line.stops.findIndex((s) => stopKey(s.n) === n);
   if (exact >= 0) return exact;
-  let best = -1;
-  let bestLen = 0;
+  if (n.length < 4) return -1;
+  const hits: number[] = [];
   for (let i = 0; i < line.stops.length; i++) {
     const k = stopKey(line.stops[i]!.n);
-    if (!k) continue;
-    if (k === n || (n.length >= 2 && (k.endsWith(n) || n.endsWith(k) || k.startsWith(n) || n.startsWith(k)))) {
-      const len = Math.min(k.length, n.length);
-      if (len > bestLen) {
-        bestLen = len;
-        best = i;
-      }
-    }
+    if (!k || k.length < 4) continue;
+    if (k === n || k.endsWith(n) || n.endsWith(k)) hits.push(i);
   }
-  return best;
+  return hits.length === 1 ? hits[0]! : -1;
 }
 
 function preferLineName(raw: string) {
@@ -1217,6 +1211,33 @@ function stitchGap(pts: [number, number][], endName: string, destName: string, l
   const more = rideGlowPath(extra, endName, destName);
   if (more.length < 2 || pathLenKm(more) > 12) return pts;
   return pts.concat(more.slice(1));
+}
+
+function lineHasStops(line: LineRuntime, fromName: string, toName: string) {
+  return stopIdx(line, fromName) >= 0 && stopIdx(line, toName) >= 0 && stopIdx(line, fromName) !== stopIdx(line, toName);
+}
+
+function glowFits(pts: [number, number][], from: { lng: number; lat: number }, to: { lng: number; lat: number }) {
+  if (pts.length < 2) return false;
+  const a = pts[0]!;
+  const b = pts[pts.length - 1]!;
+  const d0 = Math.min(haversine(a, [from.lng, from.lat]), haversine(a, [to.lng, to.lat]));
+  const d1 = Math.min(haversine(b, [from.lng, from.lat]), haversine(b, [to.lng, to.lat]));
+  return d0 < 5 && d1 < 5;
+}
+
+function pickRideLine(lines: LineRuntime[], index: ReturnType<typeof useMapStore.getState>["stationIndex"], leg: RouteLeg, from: { lng: number; lat: number; name: string }, to: { lng: number; lat: number; name: string }) {
+  const hop = haversine([from.lng, from.lat], [to.lng, to.lat]);
+  const hours = Math.max(0.2, (leg.minutes || 0) / 60);
+  const kmh = hop / hours;
+  const plat = Number.parseInt(String(leg.fromPlatform ?? "").replace(/[^\d]/g, ""), 10);
+  const namedShin = /新幹|のぞみ|ひかり|こだま|みずほ|さくら|はやぶさ|こまち|かがやき/.test(`${leg.lineName ?? ""} ${leg.trainType ?? ""}`);
+  const wantShin = namedShin || kmh >= 120 || (/東京/.test(from.name) && plat >= 14 && plat <= 23);
+  if (wantShin) {
+    const shin = lines.find((l) => l.kind === "shinkansen" && lineHasStops(l, from.name, to.name));
+    if (shin) return shin;
+  }
+  return findLineForLeg(lines, index, { ...leg, from, to }) ?? lineWithBoth(lines, from.name, to.name, leg.lineName ?? "");
 }
 
 function lineWithBoth(lines: LineRuntime[], fromName: string, toName: string, preferName = "") {
@@ -1398,42 +1419,32 @@ function remainingJourneySegs(lines: LineRuntime[]) {
       const prefer = preferLineName(leg.lineName ?? "");
       const destPt = realStopOf(lines, leg.to.name);
       const fromPt = realStopOf(lines, leg.from.name);
-      const hinted = { ...leg, from, to };
-      line = findLineForLeg(lines, index, hinted) ?? lineWithBoth(lines, leg.from.name, leg.to.name, leg.lineName ?? "");
+      line = pickRideLine(lines, index, leg, { ...from, name: leg.from.name }, { ...to, name: leg.to.name });
       if (line) {
-        const sliced = sliceRailPath(line, from, to);
+        const sliced = sliceRailPath(line, { ...from, name: leg.from.name }, { ...to, name: leg.to.name });
         pts = sliced.length >= 2 ? sliced : rideGlowPath(line, leg.from.name, leg.to.name);
+        if (pts.length >= 2 && !glowFits(pts, from, to)) pts = [];
       }
       if (pts.length < 2) {
-        const named = prefer ? lines.filter((l) => linePrefers(l, prefer)) : [];
-        const exact = lines.filter((l) => {
-          const ia = l.stops.findIndex((s) => stopKey(s.n) === stopKey(leg.from.name));
-          const ib = l.stops.findIndex((s) => stopKey(s.n) === stopKey(leg.to.name));
-          return ia >= 0 || ib >= 0;
-        });
-        const pool = named.length ? named : exact;
+        const named = prefer ? lines.filter((l) => linePrefers(l, prefer) && lineHasStops(l, leg.from.name, leg.to.name)) : [];
         const aim = destPt ?? to;
         const origin = fromPt ?? from;
-        for (const cand of pool) {
-          pts = glowOnLine(cand, leg.from.name, leg.to.name, aim.lng, aim.lat);
-          if (pts.length >= 2) {
-            line = cand;
-            break;
-          }
-          pts = glowOnLine(cand, leg.to.name, leg.from.name, origin.lng, origin.lat);
-          if (pts.length >= 2) {
-            pts = pts.slice().reverse();
+        for (const cand of named) {
+          let next = glowOnLine(cand, leg.from.name, leg.to.name, aim.lng, aim.lat);
+          if (next.length < 2) next = glowOnLine(cand, leg.to.name, leg.from.name, origin.lng, origin.lat).slice().reverse();
+          if (next.length >= 2 && glowFits(next, from, to)) {
+            pts = next;
             line = cand;
             break;
           }
         }
       }
-      if (pts.length < 2 && leg.path && leg.path.length >= 2) pts = leg.path.slice();
+      if (pts.length < 2 && leg.path && leg.path.length >= 2 && glowFits(leg.path, from, to)) pts = leg.path.slice();
       if (pts.length < 2 && leg.stops?.length >= 2) {
         const via = leg.stops
           .filter((s) => Number.isFinite(s.lng) && Number.isFinite(s.lat))
           .map((s) => [s.lng, s.lat] as [number, number]);
-        if (via.length >= 2) pts = via;
+        if (via.length >= 2 && glowFits(via, from, to)) pts = via;
       }
       if (pts.length >= 2 && line) {
         const last = pts[pts.length - 1]!;
@@ -1446,13 +1457,14 @@ function remainingJourneySegs(lines: LineRuntime[]) {
             endName = s.n;
           }
         }
-        pts = stitchGap(pts, endName, destPt?.n || leg.to.name, lines);
+        const extra = stitchGap(pts, endName, destPt?.n || leg.to.name, lines);
+        if (glowFits(extra, from, to) && pathLenKm(extra) <= pathLenKm(pts) + 12) pts = extra;
       }
       const hop =
         fromPt && destPt
           ? haversine([fromPt.lng, fromPt.lat], [destPt.lng, destPt.lat])
           : haversine([from.lng, from.lat], [to.lng, to.lat]);
-      if (pts.length >= 2 && hop > 0.4 && line?.kind !== "shinkansen" && pathLenKm(pts) > hop * 4 + 40) pts = [];
+      if (pts.length >= 2 && hop > 0.4 && pathLenKm(pts) > hop * 3.2 + 30) pts = [];
       if (pts.length < 2) {
         const a = airportOf(leg.from.name);
         const b = airportOf(leg.to.name);
@@ -1567,13 +1579,13 @@ function drawJourneyPulse(
     if (pts.length < 2) continue;
     const path = new Path2D();
     addPoly(path, pts, cam, w, h, minPx);
-    g.globalAlpha = 0.28 + 0.22 * pulse;
-    g.strokeStyle = "rgba(255, 226, 120, 0.8)";
-    g.lineWidth = 6.2;
+    g.globalAlpha = 0.32 + 0.2 * pulse;
+    g.strokeStyle = "rgba(255, 226, 120, 0.85)";
+    g.lineWidth = 4.2;
     g.stroke(path);
-    g.globalAlpha = 0.9;
+    g.globalAlpha = 0.92;
     g.strokeStyle = seg.color;
-    g.lineWidth = 3.1;
+    g.lineWidth = 2.2;
     g.stroke(path);
   }
   const delay = delaySeconds(useMapStore.getState().selectedTrain) || Math.round((useMapStore.getState().journey?.delayMin ?? 0) * 60);

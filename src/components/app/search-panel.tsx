@@ -1264,6 +1264,77 @@ export function SearchPanel() {
 }
 
 let headingWatch = false;
+const gpsHold = { lng: 0, lat: 0, acc: 9e9, t: 0, on: false };
+let fineTimer = 0;
+let streetZoom = false;
+
+export function noteStreetZoom(on: boolean) {
+  streetZoom = on;
+}
+
+function blendGps(pos: GeolocationPosition) {
+  const lng = pos.coords.longitude;
+  const lat = pos.coords.latitude;
+  if (!isInJapan(lng, lat)) return null;
+  const acc = Math.max(4, pos.coords.accuracy || 40);
+  const t = pos.timestamp || Date.now();
+  if (!gpsHold.on) {
+    gpsHold.lng = lng;
+    gpsHold.lat = lat;
+    gpsHold.acc = acc;
+    gpsHold.t = t;
+    gpsHold.on = true;
+    return { lng, lat, acc };
+  }
+  const dt = Math.max(0.25, (t - gpsHold.t) / 1000);
+  const d = haversine([gpsHold.lng, gpsHold.lat], [lng, lat]) * 1000;
+  if (d > 90 && d > acc * 1.8 && acc >= gpsHold.acc * 0.9 && dt < 20) {
+    gpsHold.t = t;
+    return { lng: gpsHold.lng, lat: gpsHold.lat, acc: gpsHold.acc };
+  }
+  if (acc > gpsHold.acc * 1.35 && acc > 16 && d < 70) {
+    gpsHold.t = t;
+    return { lng: gpsHold.lng, lat: gpsHold.lat, acc: gpsHold.acc };
+  }
+  const dead = Math.max(5, Math.min(acc, gpsHold.acc) * 0.4);
+  if (d < dead) {
+    gpsHold.acc = Math.min(gpsHold.acc, acc);
+    gpsHold.t = t;
+    return { lng: gpsHold.lng, lat: gpsHold.lat, acc: gpsHold.acc };
+  }
+  const k = acc <= 12 ? 0.5 : acc <= 22 ? 0.32 : 0.18;
+  gpsHold.lng += (lng - gpsHold.lng) * k;
+  gpsHold.lat += (lat - gpsHold.lat) * k;
+  gpsHold.acc = gpsHold.acc * 0.55 + acc * 0.45;
+  gpsHold.t = t;
+  return { lng: gpsHold.lng, lat: gpsHold.lat, acc: gpsHold.acc };
+}
+
+function armFineLocate() {
+  if (fineTimer || typeof window === "undefined") return;
+  fineTimer = window.setInterval(() => {
+    if (document.visibilityState !== "visible") return;
+    if (useMapStore.getState().locateStatus !== "ok") return;
+    if (!streetZoom && gpsHold.acc < 32) return;
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const hit = blendGps(pos);
+        if (!hit) return;
+        let { lng, lat, acc } = hit;
+        if (acc > 26) {
+          const snapped = snapToRoad(lng, lat, 16);
+          if (snapped) {
+            lng = snapped.lng;
+            lat = snapped.lat;
+          }
+        }
+        useMapStore.getState().setUserLocation({ lng, lat }, "ok");
+      },
+      () => {},
+      { enableHighAccuracy: true, timeout: 12000, maximumAge: 4000 },
+    );
+  }, 16000);
+}
 
 function startHeading() {
   if (headingWatch || typeof window === "undefined") return;
@@ -1301,41 +1372,51 @@ export function locateUser(fly: boolean) {
     }
   };
   const goNoda = (status: "denied" | "error" | "outside") => {
+    gpsHold.on = false;
     useMapStore.getState().setUserLocation(NODA, status);
     goHome(NODA.lng, NODA.lat);
   };
-  useMapStore.getState().setUserLocation(useMapStore.getState().userLocation ?? NODA, "pending");
+  if (useMapStore.getState().locateStatus !== "ok") {
+    useMapStore.getState().setUserLocation(useMapStore.getState().userLocation ?? NODA, "pending");
+  }
   if (!navigator.geolocation) {
     goNoda("error");
     return;
   }
   const apply = (pos: GeolocationPosition) => {
-    let lng = pos.coords.longitude;
-    let lat = pos.coords.latitude;
-    if (!isInJapan(lng, lat)) {
+    const hit = blendGps(pos);
+    if (!hit) {
       useMapStore.getState().setUserLocation(NODA, "outside");
       return;
     }
-    const snapped = snapToRoad(lng, lat, 16);
-    if (snapped) {
-      lng = snapped.lng;
-      lat = snapped.lat;
+    let { lng, lat, acc } = hit;
+    if (acc > 26) {
+      const snapped = snapToRoad(lng, lat, 16);
+      if (snapped) {
+        lng = snapped.lng;
+        lat = snapped.lat;
+        gpsHold.lng = lng;
+        gpsHold.lat = lat;
+      }
     }
     useMapStore.getState().setUserLocation({ lng, lat }, "ok");
   };
   navigator.geolocation.getCurrentPosition(
     (pos) => {
       apply(pos);
-      const lng = pos.coords.longitude;
-      const lat = pos.coords.latitude;
-      if (isInJapan(lng, lat)) goHome(lng, lat);
+      const here = useMapStore.getState().userLocation;
+      if (here && isInJapan(here.lng, here.lat)) goHome(here.lng, here.lat);
       else goHome(NODA.lng, NODA.lat);
+      if (!fly) {
+        navigator.geolocation.getCurrentPosition(apply, () => {}, { enableHighAccuracy: true, timeout: 14000, maximumAge: 2000 });
+      }
+      armFineLocate();
     },
     (err) => {
       goNoda(err.code === 1 ? "denied" : "error");
     },
     fly
-      ? { enableHighAccuracy: true, timeout: 12000, maximumAge: 8000 }
-      : { enableHighAccuracy: false, timeout: 10000, maximumAge: 180000 },
+      ? { enableHighAccuracy: true, timeout: 14000, maximumAge: 3000 }
+      : { enableHighAccuracy: false, timeout: 8000, maximumAge: 20000 },
   );
 }

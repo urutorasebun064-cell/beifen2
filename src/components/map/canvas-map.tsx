@@ -23,8 +23,8 @@ import {
 } from "@/lib/weather";
 import type { Journey, LineRuntime, RouteLeg, StationHit, Train } from "@/lib/rail/types";
 import { Button } from "@/components/ui/button";
-import { applyMateTrip, calibrateTrain, calibrateStation, fillPickedStation, locateUser } from "@/components/app/search-panel";
-import { findLineForLeg, locateStation, sliceRailPath } from "@/lib/rail/graph";
+import { applyMateTrip, calibrateTrain, calibrateStation, fillPickedStation, locateUser, noteStreetZoom } from "@/components/app/search-panel";
+import { densifyRailPath, findLineForLeg, locateStation, sliceRailPath } from "@/lib/rail/graph";
 import { placeTrainOnLeg, stopIndexByName } from "@/lib/rail/timetable-snap";
 import { arrivalCompare, journeyGuide, rideHeadline } from "@/components/app/route-panel";
 import { focusStay } from "@/components/app/stay-catalog";
@@ -1217,14 +1217,6 @@ function lineHasStops(line: LineRuntime, fromName: string, toName: string) {
   return stopIdx(line, fromName) >= 0 && stopIdx(line, toName) >= 0 && stopIdx(line, fromName) !== stopIdx(line, toName);
 }
 
-function glowLenOk(pts: [number, number][], from: { lng: number; lat: number }, to: { lng: number; lat: number }) {
-  if (pts.length < 2) return false;
-  const hop = haversine([from.lng, from.lat], [to.lng, to.lat]);
-  const len = pathLenKm(pts);
-  if (hop <= 0.4) return len < 8;
-  return len >= hop * 0.5 - 2 && len <= hop * 3.2 + 30;
-}
-
 function pickRideLine(lines: LineRuntime[], index: ReturnType<typeof useMapStore.getState>["stationIndex"], leg: RouteLeg, from: { lng: number; lat: number; name: string }, to: { lng: number; lat: number; name: string }) {
   const hop = haversine([from.lng, from.lat], [to.lng, to.lat]);
   const hours = Math.max(0.2, (leg.minutes || 0) / 60);
@@ -1415,55 +1407,51 @@ function remainingJourneySegs(lines: LineRuntime[]) {
     if (isAirLeg(leg)) {
       pts = airGlowPath(leg.from.name, leg.to.name, from, to);
     } else {
-      const prefer = preferLineName(leg.lineName ?? "");
-      const destPt = realStopOf(lines, leg.to.name);
-      const fromPt = realStopOf(lines, leg.from.name);
-      const aim = destPt ?? to;
-      const origin = fromPt ?? from;
-      line = pickRideLine(lines, index, leg, { ...from, name: leg.from.name }, { ...to, name: leg.to.name });
-      if (line) {
-        const sliced = sliceRailPath(line, { ...from, name: leg.from.name }, { ...to, name: leg.to.name });
-        pts = sliced.length >= 2 ? sliced : rideGlowPath(line, leg.from.name, leg.to.name);
-        if (pts.length < 2) pts = glowOnLine(line, leg.from.name, leg.to.name, aim.lng, aim.lat);
+      const hop = haversine([from.lng, from.lat], [to.lng, to.lat]);
+      const hours = Math.max(0.2, (leg.minutes || 0) / 60);
+      const plat = Number.parseInt(String(leg.fromPlatform ?? "").replace(/[^\d]/g, ""), 10);
+      const hinted = { ...leg, from, to };
+      if (
+        /新幹|のぞみ|ひかり|こだま|みずほ|さくら|はやぶさ/.test(`${leg.lineName ?? ""} ${leg.trainType ?? ""}`) ||
+        hop / hours >= 120 ||
+        (/東京/.test(from.name) && plat >= 14 && plat <= 23)
+      ) {
+        hinted.lineName = `${leg.lineName ?? ""} 新幹線`;
       }
-      if (pts.length < 2 || !glowLenOk(pts, from, to)) {
-        pts = [];
-        const named = (prefer ? lines.filter((l) => linePrefers(l, prefer)) : []).concat(
-          lines.filter((l) => stopIdx(l, leg.from.name) >= 0 || stopIdx(l, leg.to.name) >= 0),
-        );
-        const seen = new Set<string>();
-        for (const cand of named) {
-          if (seen.has(cand.id)) continue;
-          seen.add(cand.id);
-          let next = glowOnLine(cand, leg.from.name, leg.to.name, aim.lng, aim.lat);
-          if (next.length < 2) next = glowOnLine(cand, leg.to.name, leg.from.name, origin.lng, origin.lat).slice().reverse();
-          if (glowLenOk(next, from, to)) {
-            pts = next;
-            line = cand;
-            break;
+      const routed = densifyRailPath(from, to, lines, index, hinted);
+      line = routed.line;
+      pts = routed.path.length >= 3 ? routed.path : [];
+      if (pts.length < 3 && leg.path && leg.path.length >= 3) pts = leg.path.slice();
+      if (pts.length < 3) {
+        const prefer = preferLineName(leg.lineName ?? "");
+        const aim = realStopOf(lines, leg.to.name) ?? to;
+        const origin = realStopOf(lines, leg.from.name) ?? from;
+        line = pickRideLine(lines, index, hinted, { ...from, name: leg.from.name }, { ...to, name: leg.to.name }) ?? line;
+        if (line) {
+          const sliced = sliceRailPath(line, { ...from, name: leg.from.name }, { ...to, name: leg.to.name });
+          const next = sliced.length >= 2 ? sliced : glowOnLine(line, leg.from.name, leg.to.name, aim.lng, aim.lat);
+          if (next.length >= 3) pts = next;
+        }
+        if (pts.length < 3) {
+          const named = (prefer ? lines.filter((l) => linePrefers(l, prefer)) : []).concat(
+            lines.filter((l) => stopIdx(l, leg.from.name) >= 0 || stopIdx(l, leg.to.name) >= 0),
+          );
+          const seen = new Set<string>();
+          for (const cand of named) {
+            if (seen.has(cand.id)) continue;
+            seen.add(cand.id);
+            let next = glowOnLine(cand, leg.from.name, leg.to.name, aim.lng, aim.lat);
+            if (next.length < 3) next = glowOnLine(cand, leg.to.name, leg.from.name, origin.lng, origin.lat).slice().reverse();
+            if (next.length >= 3) {
+              pts = next;
+              line = cand;
+              break;
+            }
           }
         }
       }
-      if (pts.length >= 2 && line) {
-        const last = pts[pts.length - 1]!;
-        let endName = "";
-        let bestD = Infinity;
-        for (const s of line.stops) {
-          const d = (s.lng - last[0]) ** 2 + (s.lat - last[1]) ** 2;
-          if (d < bestD) {
-            bestD = d;
-            endName = s.n;
-          }
-        }
-        const extra = stitchGap(pts, endName, destPt?.n || leg.to.name, lines);
-        if (glowLenOk(extra, from, to) || pathLenKm(extra) <= pathLenKm(pts) + 12) pts = extra;
-      }
-      if ((pts.length < 2 || !glowLenOk(pts, from, to)) && leg.path && leg.path.length >= 8 && glowLenOk(leg.path, from, to)) {
-        pts = leg.path.slice();
-      }
-      if (pts.length >= 2 && !glowLenOk(pts, from, to)) pts = [];
+      if (pts.length >= 2 && hop > 2.4 && pts.length < 3) pts = [];
       if (pts.length < 2) {
-        const hop = haversine([from.lng, from.lat], [to.lng, to.lat]);
         const a = airportOf(leg.from.name);
         const b = airportOf(leg.to.name);
         if (a && b && a.id !== b.id && hop > 80) pts = airGlowPath(leg.from.name, leg.to.name, from, to);
@@ -3659,6 +3647,7 @@ export function CanvasMap() {
         running = false;
         return;
       }
+      noteStreetZoom(camRef.current.zoom >= 13.2);
       dirty = false;
       try {
         if (!bootHid) {
@@ -4253,8 +4242,9 @@ export function CanvasMap() {
             walk.lat = user.lat;
             walk.set = true;
           } else {
-            walk.lng += (user.lng - walk.lng) * 0.18;
-            walk.lat += (user.lat - walk.lat) * 0.18;
+            const k = camRef.current.zoom >= 14 ? 0.1 : camRef.current.zoom >= 12.6 ? 0.14 : 0.18;
+            walk.lng += (user.lng - walk.lng) * k;
+            walk.lat += (user.lat - walk.lat) * k;
           }
           const st = useMapStore.getState();
           const hideRing = Boolean(

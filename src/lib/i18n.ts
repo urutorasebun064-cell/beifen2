@@ -1,4 +1,5 @@
 import { toJa, toZh } from "@/lib/han";
+import { airportName } from "@/data/flights";
 
 export type Lang = "ja" | "zh" | "en";
 
@@ -715,6 +716,8 @@ export { toJa, toZh };
 
 export function displayName(text: string, lang: Lang) {
   if (!text) return text;
+  const air = airportName(text, lang);
+  if (air) return air;
   if (lang === "zh") return toZh(text);
   if (lang === "en") {
     const fn = (globalThis as unknown as { __jbToEn?: (s: string) => string }).__jbToEn;

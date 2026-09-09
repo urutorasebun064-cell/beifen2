@@ -1,47 +1,66 @@
-export type Airport = { id: string; n: string; lng: number; lat: number };
+export type Airport = { id: string; n: string; zh: string; en: string; lng: number; lat: number };
 
 export const AIRPORTS: Airport[] = [
-  { id: "HND", n: "羽田", lng: 139.7798, lat: 35.5494 },
-  { id: "NRT", n: "成田", lng: 140.3929, lat: 35.7647 },
-  { id: "ITM", n: "伊丹", lng: 135.4381, lat: 34.7855 },
-  { id: "KIX", n: "関西", lng: 135.244, lat: 34.434 },
-  { id: "NGO", n: "中部", lng: 136.8054, lat: 34.8583 },
-  { id: "CTS", n: "新千歳", lng: 141.692, lat: 42.775 },
-  { id: "FUK", n: "福岡", lng: 130.451, lat: 33.5859 },
-  { id: "OKA", n: "那覇", lng: 127.646, lat: 26.1958 },
-  { id: "SDJ", n: "仙台", lng: 140.917, lat: 38.1397 },
-  { id: "HIJ", n: "広島", lng: 132.919, lat: 34.4361 },
-  { id: "KOJ", n: "鹿児島", lng: 130.719, lat: 31.8034 },
-  { id: "KMJ", n: "熊本", lng: 130.854, lat: 32.8373 },
-  { id: "NGS", n: "長崎", lng: 129.914, lat: 32.9169 },
-  { id: "OKJ", n: "岡山", lng: 133.838, lat: 34.7569 },
-  { id: "KIJ", n: "新潟", lng: 139.121, lat: 37.9559 },
-  { id: "AOJ", n: "青森", lng: 140.691, lat: 40.7347 },
-  { id: "UKB", n: "神戸", lng: 135.223, lat: 34.6328 },
-  { id: "FSZ", n: "静岡", lng: 138.187, lat: 34.796 },
-  { id: "ICN", n: "仁川", lng: 126.4407, lat: 37.4602 },
-  { id: "TPE", n: "桃园", lng: 121.2328, lat: 25.0777 },
-  { id: "HKG", n: "香港", lng: 113.9146, lat: 22.308 },
-  { id: "PVG", n: "浦东", lng: 121.805, lat: 31.1434 },
-  { id: "PEK", n: "首都", lng: 116.5846, lat: 40.0801 },
-  { id: "BKK", n: "曼谷", lng: 100.747, lat: 13.69 },
-  { id: "SIN", n: "樟宜", lng: 103.9894, lat: 1.3502 },
-  { id: "MNL", n: "马尼拉", lng: 121.0198, lat: 14.5086 },
-  { id: "GUM", n: "关岛", lng: 144.796, lat: 13.4839 },
-  { id: "HNL", n: "檀香山", lng: -157.9224, lat: 21.3187 },
-  { id: "LAX", n: "洛杉矶", lng: -118.408, lat: 33.9425 },
-  { id: "SFO", n: "旧金山", lng: -122.375, lat: 37.6189 },
-  { id: "SEA", n: "西雅图", lng: -122.3088, lat: 47.4502 },
-  { id: "YVR", n: "温哥华", lng: -123.184, lat: 49.1947 },
-  { id: "LHR", n: "希思罗", lng: -0.4543, lat: 51.47 },
-  { id: "CDG", n: "戴高乐", lng: 2.5479, lat: 49.0097 },
-  { id: "FRA", n: "法兰克福", lng: 8.5706, lat: 50.0333 },
-  { id: "DXB", n: "迪拜", lng: 55.365, lat: 25.2532 },
-  { id: "SYD", n: "悉尼", lng: 151.1772, lat: -33.9461 },
-  { id: "SGN", n: "胡志明", lng: 106.6519, lat: 10.8188 },
+  { id: "HND", n: "羽田", zh: "羽田", en: "Haneda", lng: 139.7798, lat: 35.5494 },
+  { id: "NRT", n: "成田", zh: "成田", en: "Narita", lng: 140.3929, lat: 35.7647 },
+  { id: "ITM", n: "伊丹", zh: "伊丹", en: "Itami", lng: 135.4381, lat: 34.7855 },
+  { id: "KIX", n: "関西", zh: "关西", en: "Kansai", lng: 135.244, lat: 34.434 },
+  { id: "NGO", n: "中部", zh: "中部", en: "Chubu", lng: 136.8054, lat: 34.8583 },
+  { id: "CTS", n: "新千歳", zh: "新千岁", en: "New Chitose", lng: 141.692, lat: 42.775 },
+  { id: "FUK", n: "福岡", zh: "福冈", en: "Fukuoka", lng: 130.451, lat: 33.5859 },
+  { id: "OKA", n: "那覇", zh: "那霸", en: "Naha", lng: 127.646, lat: 26.1958 },
+  { id: "SDJ", n: "仙台", zh: "仙台", en: "Sendai", lng: 140.917, lat: 38.1397 },
+  { id: "HIJ", n: "広島", zh: "广岛", en: "Hiroshima", lng: 132.919, lat: 34.4361 },
+  { id: "KOJ", n: "鹿児島", zh: "鹿儿岛", en: "Kagoshima", lng: 130.719, lat: 31.8034 },
+  { id: "KMJ", n: "熊本", zh: "熊本", en: "Kumamoto", lng: 130.854, lat: 32.8373 },
+  { id: "NGS", n: "長崎", zh: "长崎", en: "Nagasaki", lng: 129.914, lat: 32.9169 },
+  { id: "OKJ", n: "岡山", zh: "冈山", en: "Okayama", lng: 133.838, lat: 34.7569 },
+  { id: "KIJ", n: "新潟", zh: "新潟", en: "Niigata", lng: 139.121, lat: 37.9559 },
+  { id: "AOJ", n: "青森", zh: "青森", en: "Aomori", lng: 140.691, lat: 40.7347 },
+  { id: "UKB", n: "神戸", zh: "神户", en: "Kobe", lng: 135.223, lat: 34.6328 },
+  { id: "FSZ", n: "静岡", zh: "静冈", en: "Shizuoka", lng: 138.187, lat: 34.796 },
+  { id: "ICN", n: "仁川", zh: "仁川", en: "Incheon", lng: 126.4407, lat: 37.4602 },
+  { id: "TPE", n: "桃園", zh: "桃园", en: "Taoyuan", lng: 121.2328, lat: 25.0777 },
+  { id: "HKG", n: "香港", zh: "香港", en: "Hong Kong", lng: 113.9146, lat: 22.308 },
+  { id: "PVG", n: "浦東", zh: "浦东", en: "Pudong", lng: 121.805, lat: 31.1434 },
+  { id: "PEK", n: "北京", zh: "北京", en: "Beijing", lng: 116.5846, lat: 40.0801 },
+  { id: "BKK", n: "バンコク", zh: "曼谷", en: "Bangkok", lng: 100.747, lat: 13.69 },
+  { id: "SIN", n: "チャンギ", zh: "樟宜", en: "Changi", lng: 103.9894, lat: 1.3502 },
+  { id: "MNL", n: "マニラ", zh: "马尼拉", en: "Manila", lng: 121.0198, lat: 14.5086 },
+  { id: "GUM", n: "グアム", zh: "关岛", en: "Guam", lng: 144.796, lat: 13.4839 },
+  { id: "HNL", n: "ホノルル", zh: "檀香山", en: "Honolulu", lng: -157.9224, lat: 21.3187 },
+  { id: "LAX", n: "ロサンゼルス", zh: "洛杉矶", en: "Los Angeles", lng: -118.408, lat: 33.9425 },
+  { id: "SFO", n: "サンフランシスコ", zh: "旧金山", en: "San Francisco", lng: -122.375, lat: 37.6189 },
+  { id: "SEA", n: "シアトル", zh: "西雅图", en: "Seattle", lng: -122.3088, lat: 47.4502 },
+  { id: "YVR", n: "バンクーバー", zh: "温哥华", en: "Vancouver", lng: -123.184, lat: 49.1947 },
+  { id: "LHR", n: "ヒースロー", zh: "希思罗", en: "Heathrow", lng: -0.4543, lat: 51.47 },
+  { id: "CDG", n: "シャルルドゴール", zh: "戴高乐", en: "Charles de Gaulle", lng: 2.5479, lat: 49.0097 },
+  { id: "FRA", n: "フランクフルト", zh: "法兰克福", en: "Frankfurt", lng: 8.5706, lat: 50.0333 },
+  { id: "DXB", n: "ドバイ", zh: "迪拜", en: "Dubai", lng: 55.365, lat: 25.2532 },
+  { id: "SYD", n: "シドニー", zh: "悉尼", en: "Sydney", lng: 151.1772, lat: -33.9461 },
+  { id: "SGN", n: "ホーチミン", zh: "胡志明", en: "Ho Chi Minh", lng: 106.6519, lat: 10.8188 },
 ];
 
 export const AIRPORT_BY_ID = new Map(AIRPORTS.map((a) => [a.id, a]));
+
+export function airportName(text: string, lang: "ja" | "zh" | "en") {
+  if (!text) return "";
+  const raw = text.trim();
+  const core = raw.replace(/国際空港|国际机场|國際機場|空港|机场|機場|Airport/gi, "").trim();
+  const ap =
+    AIRPORTS.find((a) => a.n === raw || a.zh === raw || a.en === raw || a.id === raw) ??
+    AIRPORTS.find((a) => a.n === core || a.zh === core || a.en === core) ??
+    AIRPORTS.find(
+      (a) =>
+        /空港|机场|機場|Airport/i.test(raw) &&
+        a.n.length >= 2 &&
+        (raw.includes(a.n) || raw.includes(a.zh) || core.includes(a.n)),
+    );
+  if (!ap) return "";
+  if (lang === "zh") return ap.zh;
+  if (lang === "en") return ap.en;
+  return ap.n;
+}
 
 export type FlightRoute = {
   id: string;

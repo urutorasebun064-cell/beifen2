@@ -1157,15 +1157,57 @@ let segsCache: { key: string; segs: { color: string; pts: [number, number][]; wa
   segs: [],
 };
 
+function stopKey(name: string) {
+  return name
+    .replace(/駅$/u, "")
+    .replace(/[（(][^）)]{0,40}[）)]/gu, "")
+    .replace(/^モノレール/u, "")
+    .replace(/[　\s]+/gu, "")
+    .trim();
+}
+
+function stopIdx(line: LineRuntime, name: string) {
+  const n = stopKey(name);
+  if (!n) return -1;
+  const exact = line.stops.findIndex((s) => stopKey(s.n) === n);
+  if (exact >= 0) return exact;
+  let best = -1;
+  let bestLen = 0;
+  for (let i = 0; i < line.stops.length; i++) {
+    const k = stopKey(line.stops[i]!.n);
+    if (!k) continue;
+    if (k === n || (n.length >= 2 && (k.endsWith(n) || n.endsWith(k) || k.startsWith(n) || n.startsWith(k)))) {
+      const len = Math.min(k.length, n.length);
+      if (len > bestLen) {
+        bestLen = len;
+        best = i;
+      }
+    }
+  }
+  return best;
+}
+
+function preferLineName(raw: string) {
+  return raw
+    .replace(/[・･].*$/u, "")
+    .replace(/[（(][^）)]{0,40}[）)]/gu, "")
+    .replace(/\s+\S+行$/u, "")
+    .replace(/^(普通|快速|急行|特急|各停|各駅停車)[・･\s]?/u, "")
+    .replace(/^JR/u, "")
+    .replace(/線$/u, "")
+    .replace(/アーバンパーク(?:ライン)?/u, "野田")
+    .trim();
+}
+
 function lineWithBoth(lines: LineRuntime[], fromName: string, toName: string, preferName = "") {
-  const prefer = preferName.replace(/^JR/u, "").replace(/線$/u, "").replace(/アーバンパーク(?:ライン)?/u, "野田").trim();
   let named: LineRuntime | null = null;
   let namedSpan = Infinity;
   let any: LineRuntime | null = null;
   let anySpan = Infinity;
+  const prefer = preferLineName(preferName);
   for (const line of lines) {
-    const ia = stopIndexByName(line, fromName);
-    const ib = stopIndexByName(line, toName);
+    const ia = stopIdx(line, fromName);
+    const ib = stopIdx(line, toName);
     if (ia < 0 || ib < 0 || ia === ib) continue;
     const span = Math.abs(ib - ia);
     const hit = Boolean(prefer) && (line.name.includes(prefer) || prefer.includes(line.name.replace(/^JR/u, "").replace(/線$/u, "")));
@@ -1181,18 +1223,72 @@ function lineWithBoth(lines: LineRuntime[], fromName: string, toName: string, pr
   return named ?? any;
 }
 
-function rideGlowPath(
-  line: LineRuntime | null,
-  fromName: string,
-  toName: string,
-): [number, number][] {
-  if (!line) return [];
-  const ia = stopIndexByName(line, fromName);
-  const ib = stopIndexByName(line, toName);
+function sliceByIndex(line: LineRuntime, ia: number, ib: number): [number, number][] {
   if (ia < 0 || ib < 0 || ia === ib) return [];
   const a = line.stops[ia]!;
   const b = line.stops[ib]!;
   return sliceRailPath(line, { lng: a.lng, lat: a.lat, name: a.n }, { lng: b.lng, lat: b.lat, name: b.n });
+}
+
+function pathLenKm(pts: [number, number][]) {
+  let n = 0;
+  for (let i = 1; i < pts.length; i++) n += haversine(pts[i - 1]!, pts[i]!);
+  return n;
+}
+
+function rideGlowPath(line: LineRuntime | null, fromName: string, toName: string): [number, number][] {
+  if (!line) return [];
+  return sliceByIndex(line, stopIdx(line, fromName), stopIdx(line, toName));
+}
+
+function glowOnLine(line: LineRuntime, fromName: string, toName: string, toLng: number, toLat: number): [number, number][] {
+  const ia = stopIdx(line, fromName);
+  if (ia < 0) return [];
+  let ib = stopIdx(line, toName);
+  if (ib < 0) {
+    let best = -1;
+    let bestD = Infinity;
+    for (let i = 0; i < line.stops.length; i++) {
+      if (i === ia) continue;
+      const s = line.stops[i]!;
+      const d = haversine([s.lng, s.lat], [toLng, toLat]);
+      if (d < bestD) {
+        bestD = d;
+        best = i;
+      }
+    }
+    ib = best;
+  }
+  return sliceByIndex(line, ia, ib);
+}
+
+function isAirLeg(leg: RouteLeg) {
+  const n = `${leg.lineName ?? ""} ${leg.from.name} ${leg.to.name}`;
+  return /JAL|ANA|JTA|FDA|IBX|SKY|APJ|SNA|便線|空路|飛行機|Airline/i.test(n) || ((/空港/.test(leg.from.name) || /空港/.test(leg.to.name)) && leg.minutes >= 35);
+}
+
+function airportOf(name: string) {
+  const n = stopKey(name);
+  if (!n) return null;
+  const hit = AIRPORTS.find((a) => n.includes(a.n) || a.n.includes(n.replace(/国際.*$/u, "").replace(/空港.*$/u, "")));
+  return hit ?? null;
+}
+
+function airGlowPath(fromName: string, toName: string, from: { lng: number; lat: number }, to: { lng: number; lat: number }): [number, number][] {
+  const a = airportOf(fromName);
+  const b = airportOf(toName);
+  const p0: [number, number] = a ? [a.lng, a.lat] : [from.lng, from.lat];
+  const p1: [number, number] = b ? [b.lng, b.lat] : [to.lng, to.lat];
+  if (!Number.isFinite(p0[0]) || !Number.isFinite(p1[0]) || haversine(p0, p1) < 30) return [];
+  const out: [number, number][] = [];
+  for (let i = 0; i <= 8; i++) {
+    const t = i / 8;
+    let dLng = p1[0] - p0[0];
+    if (dLng > 180) dLng -= 360;
+    if (dLng < -180) dLng += 360;
+    out.push([p0[0] + dLng * t, p0[1] + (p1[1] - p0[1]) * t + Math.sin(t * Math.PI) * 0.35]);
+  }
+  return out;
 }
 
 function remainingJourneySegs(lines: LineRuntime[]) {
@@ -1263,12 +1359,37 @@ function remainingJourneySegs(lines: LineRuntime[]) {
     }
     const from = locateStation(leg.from.name, lines, index, leg.from);
     const to = locateStation(leg.to.name, lines, index, leg.to);
-    const line = lineWithBoth(lines, leg.from.name, leg.to.name, leg.lineName ?? "");
-    let pts = rideGlowPath(line, leg.from.name, leg.to.name);
-    if (pts.length >= 2 && train && train.kind !== "flight") {
-      const near = nearestPathIndex(pts, train.lng, train.lat);
-      const d = haversine(pts[near] ?? pts[0]!, [train.lng, train.lat]);
-      if (d < 1.2) pts = clipFromTrain(pts, train.lng, train.lat);
+    let line: LineRuntime | null = null;
+    let pts: [number, number][] = [];
+    if (isAirLeg(leg)) {
+      pts = airGlowPath(leg.from.name, leg.to.name, from, to);
+    } else {
+      const prefer = preferLineName(leg.lineName ?? "");
+      line = lineWithBoth(lines, leg.from.name, leg.to.name, leg.lineName ?? "");
+      pts = rideGlowPath(line, leg.from.name, leg.to.name);
+      if (pts.length < 2 && prefer) {
+        const named = lines.filter((l) => l.name.includes(prefer) || prefer.includes(l.name.replace(/^JR/u, "").replace(/線$/u, "")));
+        for (const cand of named) {
+          pts = glowOnLine(cand, leg.from.name, leg.to.name, to.lng, to.lat);
+          if (pts.length >= 2) {
+            line = cand;
+            break;
+          }
+          pts = glowOnLine(cand, leg.to.name, leg.from.name, from.lng, from.lat);
+          if (pts.length >= 2) {
+            pts = pts.slice().reverse();
+            line = cand;
+            break;
+          }
+        }
+      }
+      const hop = haversine([from.lng, from.lat], [to.lng, to.lat]);
+      if (pts.length >= 2 && hop > 0.2 && pathLenKm(pts) > hop * 1.8 + 6) pts = [];
+      if (pts.length >= 2 && train && train.kind !== "flight" && lineMatchesLeg(train, leg) && sameWay(train, leg, lines)) {
+        const near = nearestPathIndex(pts, train.lng, train.lat);
+        const d = haversine(pts[near] ?? pts[0]!, [train.lng, train.lat]);
+        if (d < 1.2) pts = clipFromTrain(pts, train.lng, train.lat);
+      }
     }
     if (pts.length < 2 && shopTrip) {
       pts = [

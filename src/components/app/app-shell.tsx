@@ -22,6 +22,8 @@ import { tokyoParts } from "@/lib/rail/geo";
 import { prepareLine, buildStationIndex, unpackRails, type CompactRails } from "@/lib/rail/normalize";
 import { useMapStore, simNow } from "@/store/map-store";
 import { registerPwa } from "@/lib/pwa";
+import { loadStaticJson } from "@/lib/static-cache";
+import { startSaveSync } from "@/lib/save-sync";
 
 export function AppShell() {
   const lang = useMapStore((s) => s.lang);
@@ -58,6 +60,7 @@ export function AppShell() {
 
   useEffect(() => {
     void registerPwa();
+    startSaveSync();
   }, []);
 
   useEffect(() => {
@@ -170,24 +173,26 @@ export function AppShell() {
 
   useEffect(() => {
     let cancelled = false;
+    const apply = async (compact: CompactRails) => {
+      if (cancelled) return;
+      await new Promise((r) => window.setTimeout(r, 0));
+      if (cancelled) return;
+      const raw = unpackRails(compact);
+      const lines = [];
+      for (let i = 0; i < raw.length; i++) {
+        lines.push(prepareLine(raw[i]!));
+        if (i % 48 === 0) await new Promise((r) => window.setTimeout(r, 0));
+        if (cancelled) return;
+      }
+      const index = buildStationIndex(lines);
+      if (cancelled) return;
+      useMapStore.getState().setDataset(lines, index);
+    };
     const boot = async () => {
       try {
-        const res = await fetch("/data/rails.min.json");
-        if (!res.ok || cancelled) return;
-        const compact = (await res.json()) as CompactRails;
-        if (cancelled) return;
-        await new Promise((r) => window.setTimeout(r, 0));
-        if (cancelled) return;
-        const raw = unpackRails(compact);
-        const lines = [];
-        for (let i = 0; i < raw.length; i++) {
-          lines.push(prepareLine(raw[i]!));
-          if (i % 48 === 0) await new Promise((r) => window.setTimeout(r, 0));
-          if (cancelled) return;
-        }
-        const index = buildStationIndex(lines);
-        if (cancelled) return;
-        useMapStore.getState().setDataset(lines, index);
+        const packed = await loadStaticJson<CompactRails>("/data/rails.min.json", "rails");
+        if (!packed || cancelled) return;
+        await apply(packed.data);
       } catch {
         /* map already visible */
       }

@@ -7,6 +7,7 @@ import type { KonbiniBrand, KonbiniStore } from "@/lib/konbini";
 import type { Peak } from "@/data/peaks";
 import type { Quake } from "@/lib/quake";
 import type { WeatherSpot } from "@/lib/weather";
+import { patchSave } from "@/lib/save-sync";
 
 export type PitchMode = "3d" | "2d";
 export type MenuKind = "quake" | "radar" | "stay" | "peaks";
@@ -153,7 +154,10 @@ let flyNonce = 0;
 export const useMapStore = create<MapStore>((set, get) => ({
   lang: detectLang(),
   setLang: (lang) => {
-    if (typeof window !== "undefined") window.localStorage.setItem("jb-lang", lang);
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem("jb-lang", lang);
+      patchSave({ lang });
+    }
     set({ lang });
   },
   lines: [],

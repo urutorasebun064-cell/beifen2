@@ -7,6 +7,7 @@ import { applyMateTrip } from "@/components/app/search-panel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useMapStore } from "@/store/map-store";
+import { patchSave } from "@/lib/save-sync";
 
 type Member = { id: string; nick: string; online?: boolean; host?: boolean; lng?: number; lat?: number; pinAt?: number; near?: string };
 type Msg = { id: number; nick: string; body: string; at: string; uid?: string };
@@ -223,6 +224,7 @@ function saveLast(room: string, pass: string, nick?: string) {
   } catch {
     /* */
   }
+  patchSave({ lastRoom: room.slice(0, 24), nick: first || undefined });
 }
 
 function url64(s: string) {

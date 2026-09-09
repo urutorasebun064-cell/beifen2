@@ -18,6 +18,7 @@ import { Route as ApiQuakeRouteImport } from './routes/api/quake'
 import { Route as ApiRadarRouteImport } from './routes/api/radar'
 import { Route as ApiReserveRouteImport } from './routes/api/reserve'
 import { Route as ApiRoadsRouteImport } from './routes/api/roads'
+import { Route as ApiSaveRouteImport } from './routes/api/save'
 import { Route as ApiTransitRouteImport } from './routes/api/transit'
 import { Route as ApiWeatherRouteImport } from './routes/api/weather'
 import { Route as ApiKonbiniChatRouteImport } from './routes/api/konbini/chat'
@@ -68,6 +69,11 @@ const ApiRoadsRoute = ApiRoadsRouteImport.update({
   path: '/api/roads',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiSaveRoute = ApiSaveRouteImport.update({
+  id: '/api/save',
+  path: '/api/save',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiTransitRoute = ApiTransitRouteImport.update({
   id: '/api/transit',
   path: '/api/transit',
@@ -99,6 +105,7 @@ export interface FileRoutesByFullPath {
   '/api/radar': typeof ApiRadarRoute
   '/api/reserve': typeof ApiReserveRoute
   '/api/roads': typeof ApiRoadsRoute
+  '/api/save': typeof ApiSaveRoute
   '/api/transit': typeof ApiTransitRoute
   '/api/weather': typeof ApiWeatherRoute
   '/api/konbini/chat': typeof ApiKonbiniChatRoute
@@ -114,6 +121,7 @@ export interface FileRoutesByTo {
   '/api/radar': typeof ApiRadarRoute
   '/api/reserve': typeof ApiReserveRoute
   '/api/roads': typeof ApiRoadsRoute
+  '/api/save': typeof ApiSaveRoute
   '/api/transit': typeof ApiTransitRoute
   '/api/weather': typeof ApiWeatherRoute
   '/api/konbini/chat': typeof ApiKonbiniChatRoute
@@ -130,6 +138,7 @@ export interface FileRoutesById {
   '/api/radar': typeof ApiRadarRoute
   '/api/reserve': typeof ApiReserveRoute
   '/api/roads': typeof ApiRoadsRoute
+  '/api/save': typeof ApiSaveRoute
   '/api/transit': typeof ApiTransitRoute
   '/api/weather': typeof ApiWeatherRoute
   '/api/konbini/chat': typeof ApiKonbiniChatRoute
@@ -147,6 +156,7 @@ export interface FileRouteTypes {
     | '/api/radar'
     | '/api/reserve'
     | '/api/roads'
+    | '/api/save'
     | '/api/transit'
     | '/api/weather'
     | '/api/konbini/chat'
@@ -162,6 +172,7 @@ export interface FileRouteTypes {
     | '/api/radar'
     | '/api/reserve'
     | '/api/roads'
+    | '/api/save'
     | '/api/transit'
     | '/api/weather'
     | '/api/konbini/chat'
@@ -177,6 +188,7 @@ export interface FileRouteTypes {
     | '/api/radar'
     | '/api/reserve'
     | '/api/roads'
+    | '/api/save'
     | '/api/transit'
     | '/api/weather'
     | '/api/konbini/chat'
@@ -193,6 +205,7 @@ export interface RootRouteChildren {
   ApiRadarRoute: typeof ApiRadarRoute
   ApiReserveRoute: typeof ApiReserveRoute
   ApiRoadsRoute: typeof ApiRoadsRoute
+  ApiSaveRoute: typeof ApiSaveRoute
   ApiTransitRoute: typeof ApiTransitRoute
   ApiWeatherRoute: typeof ApiWeatherRoute
   ApiKonbiniChatRoute: typeof ApiKonbiniChatRoute
@@ -264,6 +277,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiRoadsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/save': {
+      id: '/api/save'
+      path: '/api/save'
+      fullPath: '/api/save'
+      preLoaderRoute: typeof ApiSaveRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/transit': {
       id: '/api/transit'
       path: '/api/transit'
@@ -305,6 +325,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiRadarRoute: ApiRadarRoute,
   ApiReserveRoute: ApiReserveRoute,
   ApiRoadsRoute: ApiRoadsRoute,
+  ApiSaveRoute: ApiSaveRoute,
   ApiTransitRoute: ApiTransitRoute,
   ApiWeatherRoute: ApiWeatherRoute,
   ApiKonbiniChatRoute: ApiKonbiniChatRoute,

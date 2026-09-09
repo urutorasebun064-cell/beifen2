@@ -35,6 +35,7 @@ import { drawRoads, pullRoads, SHOW_ZOOM } from "@/lib/roads";
 import { STAYS, stayLabel } from "@/data/stays";
 import { PEAKS, FUJI_H, peakLabel, type Peak } from "@/data/peaks";
 import { useMapStore, simNow } from "@/store/map-store";
+import { patchSave, readSave } from "@/lib/save-sync";
 
 type Cam = { lng: number; lat: number; zoom: number; yaw: number; tilt: number };
 
@@ -161,19 +162,36 @@ let camSaveAt = 0;
 function readSessionCam(): Cam | null {
   try {
     const raw = sessionStorage.getItem(CAM_KEY);
-    if (!raw) return null;
-    const v = JSON.parse(raw) as Cam;
-    if (!inJapan(v.lng, v.lat) || !Number.isFinite(v.zoom)) return null;
-    return {
-      lng: v.lng,
-      lat: v.lat,
-      zoom: clampZoom(v.zoom),
-      yaw: Number.isFinite(v.yaw) ? v.yaw : 0,
-      tilt: Number.isFinite(v.tilt) ? clampTilt(v.tilt) : HOME_TILT,
-    };
+    if (raw) {
+      const v = JSON.parse(raw) as Cam;
+      if (inJapan(v.lng, v.lat) && Number.isFinite(v.zoom)) {
+        return {
+          lng: v.lng,
+          lat: v.lat,
+          zoom: clampZoom(v.zoom),
+          yaw: Number.isFinite(v.yaw) ? v.yaw : 0,
+          tilt: Number.isFinite(v.tilt) ? clampTilt(v.tilt) : HOME_TILT,
+        };
+      }
+    }
   } catch {
-    return null;
+    /* */
   }
+  try {
+    const cam = readSave()?.cam;
+    if (cam && inJapan(cam.lng, cam.lat) && Number.isFinite(cam.zoom)) {
+      return {
+        lng: cam.lng,
+        lat: cam.lat,
+        zoom: clampZoom(cam.zoom),
+        yaw: Number.isFinite(cam.yaw) ? cam.yaw : 0,
+        tilt: Number.isFinite(cam.tilt) ? clampTilt(cam.tilt) : HOME_TILT,
+      };
+    }
+  } catch {
+    /* */
+  }
+  return null;
 }
 
 function rememberCam(cam: Cam) {
@@ -185,6 +203,7 @@ function rememberCam(cam: Cam) {
   } catch {
     /* private mode */
   }
+  patchSave({ cam: { lng: cam.lng, lat: cam.lat, zoom: cam.zoom, yaw: cam.yaw, tilt: cam.tilt } });
 }
 
 function panGain(zoom: number) {
@@ -1193,10 +1212,43 @@ function preferLineName(raw: string) {
     .replace(/[（(][^）)]{0,40}[）)]/gu, "")
     .replace(/\s+\S+行$/u, "")
     .replace(/^(普通|快速|急行|特急|各停|各駅停車)[・･\s]?/u, "")
-    .replace(/^JR/u, "")
+    .replace(/^[ＪJ][ＲR](東日本|西日本|東海|北海道|九州|四国)?/u, "")
+    .replace(/^(東京メトロ|東京地下鉄|都営|東武|西武|京成|京急|京王|小田急|東急|相鉄|名鉄|近鉄|阪神|阪急|南海)/u, "")
     .replace(/線$/u, "")
     .replace(/アーバンパーク(?:ライン)?/u, "野田")
+    .replace(/スカイツリー(?:ライン)?/u, "伊勢崎")
+    .replace(/羽田空港?線$/u, "羽田")
+    .replace(/\s/g, "")
     .trim();
+}
+
+function linePrefers(line: LineRuntime, prefer: string) {
+  if (!prefer) return false;
+  const n = line.name.replace(/^JR/u, "").replace(/線$/u, "");
+  return line.name.includes(prefer) || n.includes(prefer) || prefer.includes(n) || prefer.includes(n.replace(/^JR/u, ""));
+}
+
+function realStopOf(lines: LineRuntime[], name: string) {
+  let named: { lng: number; lat: number; n: string } | null = null;
+  let any: { lng: number; lat: number; n: string } | null = null;
+  for (const line of lines) {
+    const i = stopIdx(line, name);
+    if (i < 0) continue;
+    const s = line.stops[i]!;
+    const hit = { lng: s.lng, lat: s.lat, n: s.n };
+    if (stopKey(s.n) === stopKey(name) && !named) named = hit;
+    if (!any) any = hit;
+  }
+  return named ?? any;
+}
+
+function stitchGap(pts: [number, number][], endName: string, destName: string, lines: LineRuntime[]) {
+  if (!endName || !destName || stopKey(endName) === stopKey(destName)) return pts;
+  const extra = lineWithBoth(lines, endName, destName, "");
+  if (!extra) return pts;
+  const more = rideGlowPath(extra, endName, destName);
+  if (more.length < 2 || pathLenKm(more) > 12) return pts;
+  return pts.concat(more.slice(1));
 }
 
 function lineWithBoth(lines: LineRuntime[], fromName: string, toName: string, preferName = "") {
@@ -1210,8 +1262,8 @@ function lineWithBoth(lines: LineRuntime[], fromName: string, toName: string, pr
     const ib = stopIdx(line, toName);
     if (ia < 0 || ib < 0 || ia === ib) continue;
     const span = Math.abs(ib - ia);
-    const hit = Boolean(prefer) && (line.name.includes(prefer) || prefer.includes(line.name.replace(/^JR/u, "").replace(/線$/u, "")));
-    if (hit && span < namedSpan) {
+    const namedHit = Boolean(prefer) && (line.name.includes(prefer) || prefer.includes(line.name.replace(/^JR/u, "").replace(/線$/u, "")) || linePrefers(line, prefer));
+    if (namedHit && span < namedSpan) {
       named = line;
       namedSpan = span;
     }
@@ -1365,17 +1417,27 @@ function remainingJourneySegs(lines: LineRuntime[]) {
       pts = airGlowPath(leg.from.name, leg.to.name, from, to);
     } else {
       const prefer = preferLineName(leg.lineName ?? "");
+      const destPt = realStopOf(lines, leg.to.name);
+      const fromPt = realStopOf(lines, leg.from.name);
       line = lineWithBoth(lines, leg.from.name, leg.to.name, leg.lineName ?? "");
       pts = rideGlowPath(line, leg.from.name, leg.to.name);
-      if (pts.length < 2 && prefer) {
-        const named = lines.filter((l) => l.name.includes(prefer) || prefer.includes(l.name.replace(/^JR/u, "").replace(/線$/u, "")));
-        for (const cand of named) {
-          pts = glowOnLine(cand, leg.from.name, leg.to.name, to.lng, to.lat);
+      if (pts.length < 2) {
+        const named = prefer ? lines.filter((l) => linePrefers(l, prefer)) : [];
+        const exact = lines.filter((l) => {
+          const ia = l.stops.findIndex((s) => stopKey(s.n) === stopKey(leg.from.name));
+          const ib = l.stops.findIndex((s) => stopKey(s.n) === stopKey(leg.to.name));
+          return ia >= 0 || ib >= 0;
+        });
+        const pool = named.length ? named : exact;
+        const aim = destPt ?? to;
+        const origin = fromPt ?? from;
+        for (const cand of pool) {
+          pts = glowOnLine(cand, leg.from.name, leg.to.name, aim.lng, aim.lat);
           if (pts.length >= 2) {
             line = cand;
             break;
           }
-          pts = glowOnLine(cand, leg.to.name, leg.from.name, from.lng, from.lat);
+          pts = glowOnLine(cand, leg.to.name, leg.from.name, origin.lng, origin.lat);
           if (pts.length >= 2) {
             pts = pts.slice().reverse();
             line = cand;
@@ -1383,8 +1445,24 @@ function remainingJourneySegs(lines: LineRuntime[]) {
           }
         }
       }
-      const hop = haversine([from.lng, from.lat], [to.lng, to.lat]);
-      if (pts.length >= 2 && hop > 0.2 && pathLenKm(pts) > hop * 1.8 + 6) pts = [];
+      if (pts.length >= 2 && line) {
+        const last = pts[pts.length - 1]!;
+        let endName = "";
+        let bestD = Infinity;
+        for (const s of line.stops) {
+          const d = (s.lng - last[0]) ** 2 + (s.lat - last[1]) ** 2;
+          if (d < bestD) {
+            bestD = d;
+            endName = s.n;
+          }
+        }
+        pts = stitchGap(pts, endName, destPt?.n || leg.to.name, lines);
+      }
+      const hop =
+        fromPt && destPt
+          ? haversine([fromPt.lng, fromPt.lat], [destPt.lng, destPt.lat])
+          : haversine([from.lng, from.lat], [to.lng, to.lat]);
+      if (pts.length >= 2 && hop > 0.4 && pathLenKm(pts) > hop * 2.2 + 10) pts = [];
       if (pts.length >= 2 && train && train.kind !== "flight" && lineMatchesLeg(train, leg) && sameWay(train, leg, lines)) {
         const near = nearestPathIndex(pts, train.lng, train.lat);
         const d = haversine(pts[near] ?? pts[0]!, [train.lng, train.lat]);
@@ -1465,11 +1543,11 @@ function drawJourneyPulse(
     }
     const path = new Path2D();
     addPoly(path, seg.pts, cam, w, h, minPx);
-    g.globalAlpha = 0.28 + 0.4 * pulse;
-    g.strokeStyle = glow(seg.color, 0.6);
-    g.lineWidth = 12 + 6 * pulse;
+    g.globalAlpha = 0.42 + 0.38 * pulse;
+    g.strokeStyle = "rgba(255, 226, 120, 0.92)";
+    g.lineWidth = 13 + 6 * pulse;
     g.stroke(path);
-    g.globalAlpha = 0.82 + 0.18 * pulse;
+    g.globalAlpha = 0.88 + 0.12 * pulse;
     g.strokeStyle = seg.color;
     g.lineWidth = 5.2 + 2.2 * pulse;
     g.stroke(path);

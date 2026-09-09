@@ -1,5 +1,7 @@
-/* J PWA — never hijack page opens. Old interceptors caused a black screen. */
-const SW_VER = "j-v14";
+/* J PWA — never hijack navigations or scripts. Old interceptors caused a black screen. */
+const SW_VER = "j-v15";
+const TILES = "jb-tiles-v1";
+const STATIC = "jb-static-v1";
 
 self.addEventListener("install", () => {
   self.skipWaiting();
@@ -9,13 +11,64 @@ self.addEventListener("activate", (event) => {
   event.waitUntil(
     caches
       .keys()
-      .then((keys) => Promise.all(keys.map((k) => caches.delete(k))))
+      .then((keys) => Promise.all(keys.filter((k) => k !== TILES && k !== STATIC).map((k) => caches.delete(k))))
       .then(() => self.clients.claim()),
   );
 });
 
-self.addEventListener("fetch", () => {
-  /* never hijack — broken intercepts caused HTTP / black screen */
+function isStaticGet(req) {
+  if (req.method !== "GET") return false;
+  if (req.mode === "navigate") return false;
+  const dest = req.destination;
+  if (dest === "document" || dest === "script" || dest === "style" || dest === "manifest" || dest === "worker") return false;
+  let u;
+  try {
+    u = new URL(req.url);
+  } catch {
+    return false;
+  }
+  if (u.origin === self.location.origin) {
+    if (u.pathname === "/data/rails.min.json") return "static";
+    if (u.pathname === "/api/radar") return "tiles";
+    return false;
+  }
+  if (u.hostname === "tile.openstreetmap.jp" || u.hostname === "cyberjapandata.gsi.go.jp") return "tiles";
+  return false;
+}
+
+async function cacheFirst(req, bucket) {
+  const cache = await caches.open(bucket);
+  const hit = await cache.match(req);
+  if (hit) return hit;
+  const res = await fetch(req);
+  if (res && (res.ok || res.type === "opaque")) {
+    try {
+      await cache.put(req, res.clone());
+    } catch {
+      /* quota */
+    }
+  }
+  return res;
+}
+
+async function staleRails(req) {
+  const cache = await caches.open(STATIC);
+  const hit = await cache.match(req);
+  const net = fetch(req)
+    .then((res) => {
+      if (res && res.ok) cache.put(req, res.clone()).catch(() => {});
+      return res;
+    })
+    .catch(() => hit);
+  return hit || net;
+}
+
+self.addEventListener("fetch", (event) => {
+  const kind = isStaticGet(event.request);
+  if (!kind) return;
+  event.respondWith(
+    (kind === "static" ? staleRails(event.request) : cacheFirst(event.request, TILES)).catch(() => fetch(event.request)),
+  );
 });
 
 self.addEventListener("push", (event) => {

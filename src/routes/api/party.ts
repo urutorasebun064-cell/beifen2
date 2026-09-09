@@ -108,7 +108,7 @@ async function ensureVapid() {
   }
 }
 
-async function pingPush(room: Room, exceptId: string, title: string, body: string) {
+async function pingPush(room: Room, exceptId: string) {
   const keys = await ensureVapid();
   if (!keys?.publicKey || !keys.privateKey) return;
   let wp: { setVapidDetails: (a: string, b: string, c: string) => void; sendNotification: (sub: unknown, payload: string) => Promise<unknown> } | null = null;
@@ -124,7 +124,7 @@ async function pingPush(room: Room, exceptId: string, title: string, body: strin
   } catch {
     return;
   }
-  const payload = JSON.stringify({ title, body, tag: `jb-party-${Date.now()}` });
+  const payload = JSON.stringify({ title: "J-Bmap", body: "•", tag: "jb-party", silent: false });
   const jobs = room.members
     .filter((m) => m.id !== exceptId && m.push?.endpoint && m.push.p256dh && m.push.auth)
     .map((m) =>
@@ -934,7 +934,7 @@ export const Route = createFileRoute("/api/party")({
           bumpTtl(room);
           await saveRoom(found.key, room);
           try {
-            await pingPush(room, me.id, room.name, `${me.nick}: ${text}`);
+            await pingPush(room, me.id);
           } catch {
             /* */
           }

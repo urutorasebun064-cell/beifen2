@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
-import { MessageCircle, Navigation, Store, X } from "lucide-react";
+import { ChevronDown, MessageCircle, Navigation, Store, X } from "lucide-react";
 import { copies } from "@/lib/i18n";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -121,6 +121,7 @@ export function ShopChat({
   const t = copies[lang];
   const loc = useMapStore((s) => s.userLocation);
   const gpsOk = useMapStore((s) => s.locateStatus) === "ok";
+  const collapsed = useMapStore((s) => s.shopChatCollapsed);
   const [nick, setNick] = useState(() => shopNickOf(storeId));
   const [text, setText] = useState("");
   const [rows, setRows] = useState<ChatMsg[]>([]);
@@ -210,7 +211,7 @@ export function ShopChat({
     };
   }, [open, storeId, gpsOk, inside, lng, lat]);
 
-  if (!open) return null;
+  if (!open || collapsed) return null;
   const send = async (e: FormEvent) => {
     e.preventDefault();
     if (!gpsOk) {
@@ -268,9 +269,19 @@ export function ShopChat({
       <div className="flex max-h-[78vh] w-full max-w-md flex-col overflow-hidden rounded-[var(--radius-lg)] bg-surface shadow-[var(--shadow-border)]">
         <div className="flex items-center justify-between border-b border-border px-3 py-2.5">
           <p className="truncate text-sm font-medium text-fg">{title}</p>
-          <button type="button" className="rounded-full p-1 text-fg-muted" onClick={onClose} aria-label={t.close}>
-            <X className="size-4" />
-          </button>
+          <div className="flex shrink-0 items-center gap-0.5">
+            <button
+              type="button"
+              className="rounded-full p-1 text-fg-muted"
+              onClick={() => useMapStore.getState().setShopChatCollapsed(true)}
+              aria-label={t.panelClose}
+            >
+              <ChevronDown className="size-4" />
+            </button>
+            <button type="button" className="rounded-full p-1 text-fg-muted" onClick={onClose} aria-label={t.close}>
+              <X className="size-4" />
+            </button>
+          </div>
         </div>
         <p className="px-3 pt-2 text-[11px] text-fg-muted">{gpsOk && inside ? t.konbiniInRange : t.konbiniTooFar.replace("{m}", String(KONBINI_CHAT_M))}</p>
         <p className="px-3 pt-1 text-[11px] font-medium text-fg-muted">{t.konbiniOnline.replace("{n}", String(people.length))}</p>
@@ -408,7 +419,11 @@ export function KonbiniBar() {
           <button
             type="button"
             className="inline-flex h-12 min-h-12 flex-1 items-center justify-center gap-1.5 rounded-[var(--radius-md)] bg-accent px-3 text-sm font-medium text-accent-fg"
-            onClick={() => useMapStore.getState().setKonbiniChat(true)}
+            onClick={() => {
+              const s = useMapStore.getState();
+              s.setKonbiniChat(true);
+              s.setShopChatCollapsed(false);
+            }}
           >
             <MessageCircle className="size-4" />
             {t.konbiniChat}
@@ -424,6 +439,23 @@ export function KonbiniBar() {
         </div>
       </div>
     </>
+  );
+}
+
+export function ShopCommunityButton() {
+  const lang = useMapStore((s) => s.lang);
+  const t = copies[lang];
+  const shopOpen = useMapStore((s) => s.konbiniChat || s.stayChat);
+  const collapsed = useMapStore((s) => s.shopChatCollapsed);
+  if (!shopOpen || !collapsed) return null;
+  return (
+    <button
+      type="button"
+      className={`inline-flex min-h-36 w-11 items-center justify-center rounded-[var(--radius-md)] bg-surface/94 py-3 text-xs font-medium text-accent shadow-[var(--shadow-border)] [writing-mode:vertical-rl] ${lang === "zh" ? "tracking-normal" : "tracking-[0.18em]"}`}
+      onClick={() => useMapStore.getState().setShopChatCollapsed(false)}
+    >
+      {t.shopCommunity}
+    </button>
   );
 }
 

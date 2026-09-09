@@ -119,6 +119,8 @@ type MapStore = {
   setKonbiniScreen: (pos: { x: number; y: number } | null) => void;
   konbiniChat: boolean;
   setKonbiniChat: (on: boolean) => void;
+  shopChatCollapsed: boolean;
+  setShopChatCollapsed: (on: boolean) => void;
   konbiniWalk: boolean;
   setKonbiniWalk: (on: boolean) => void;
   quakes: Quake[];
@@ -328,7 +330,7 @@ export const useMapStore = create<MapStore>((set, get) => ({
   stayWalk: false,
   setStayWalk: (stayWalk) => set({ stayWalk }),
   stayChat: false,
-  setStayChat: (stayChat) => set({ stayChat }),
+  setStayChat: (stayChat) => set({ stayChat, shopChatCollapsed: false }),
   konbiniBrand: null,
   setKonbiniBrand: (konbiniBrand) =>
     set((s) => {
@@ -385,7 +387,9 @@ export const useMapStore = create<MapStore>((set, get) => ({
   konbiniScreen: null,
   setKonbiniScreen: (konbiniScreen) => set({ konbiniScreen }),
   konbiniChat: false,
-  setKonbiniChat: (konbiniChat) => set({ konbiniChat }),
+  setKonbiniChat: (konbiniChat) => set({ konbiniChat, shopChatCollapsed: false }),
+  shopChatCollapsed: false,
+  setShopChatCollapsed: (shopChatCollapsed) => set({ shopChatCollapsed }),
   konbiniWalk: false,
   setKonbiniWalk: (konbiniWalk) => set({ konbiniWalk }),
   quakes: [],

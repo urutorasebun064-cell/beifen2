@@ -325,7 +325,11 @@ export function StayBar() {
           <button
             type="button"
             className="inline-flex h-12 min-h-12 flex-1 items-center justify-center gap-1.5 rounded-[var(--radius-md)] bg-accent px-3 text-sm font-medium text-accent-fg"
-            onClick={() => useMapStore.getState().setStayChat(true)}
+            onClick={() => {
+              const s = useMapStore.getState();
+              s.setStayChat(true);
+              s.setShopChatCollapsed(false);
+            }}
           >
             <MessageCircle className="size-4" />
             {t.konbiniChat}

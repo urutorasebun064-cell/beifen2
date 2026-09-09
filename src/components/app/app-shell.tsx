@@ -3,7 +3,7 @@ import { ChevronDown, ChevronUp, X } from "lucide-react";
 import { JapanMap } from "@/components/map/japan-map";
 import { SearchPanel, locateUser, startTransitRefresh, mergeCalibratedLive } from "@/components/app/search-panel";
 import { StayBar, StayBubble, StayCatalog, StayChat } from "@/components/app/stay-catalog";
-import { KonbiniBar, KonbiniBubble, KonbiniChat, KonbiniLoadingChip } from "@/components/app/konbini-panel";
+import { KonbiniBar, KonbiniBubble, KonbiniChat, KonbiniLoadingChip, ShopCommunityButton } from "@/components/app/konbini-panel";
 import { PeakBubble, PeakCatalog } from "@/components/app/peak-catalog";
 import { PartyButton, PartySafe } from "@/components/app/party-panel";
 import { BootSplash } from "@/components/app/boot-splash";
@@ -267,8 +267,9 @@ export function AppShell() {
           <PeakCatalog />
           <StayCatalog />
         </div>
-        <div className="pointer-events-auto">
+        <div className="pointer-events-auto flex flex-col items-start gap-2">
           <PartyButton />
+          <ShopCommunityButton />
         </div>
       </div>
 

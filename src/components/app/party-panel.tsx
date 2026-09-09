@@ -366,23 +366,6 @@ function saveSeen(room: string, id: number) {
 async function partyNotify() {
   markUnread();
   pingChat();
-  if (typeof document !== "undefined" && document.visibilityState === "visible") return;
-  try {
-    if (!("Notification" in window)) return;
-    if (Notification.permission !== "granted") return;
-    const lang = useMapStore.getState().lang;
-    const t = copies[lang];
-    const reg = await navigator.serviceWorker?.ready.catch(() => undefined);
-    const title = t.partyParty;
-    const body = t.partyPing;
-    if (reg?.showNotification) {
-      await reg.showNotification(title, { body, tag: "jb-party", icon: "/icon-192.png", badge: "/icon-192.png", silent: false, renotify: true });
-    } else {
-      new Notification(title, { body, tag: "jb-party", icon: "/icon-192.png", silent: false });
-    }
-  } catch {
-    /* */
-  }
 }
 
 export function PartyButton() {

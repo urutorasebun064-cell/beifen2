@@ -72,31 +72,20 @@ self.addEventListener("fetch", (event) => {
 });
 
 self.addEventListener("push", (event) => {
-  let data = { title: "J-Bmap", body: "•", tag: "jb-party", silent: false };
-  try {
-    data = { ...data, ...(event.data ? event.data.json() : {}) };
-  } catch {
-    try {
-      const t = event.data ? event.data.text() : "";
-      if (t) data.body = "•";
-    } catch {
-      /* */
-    }
-  }
   event.waitUntil(
-    self.registration.showNotification(data.title || "J-Bmap", {
-      body: data.body && data.body !== "•" ? "•" : data.body || "•",
-      tag: "jb-party",
-      icon: "/icon-192.png",
-      badge: "/icon-192.png",
-      silent: false,
-      renotify: true,
-      vibrate: [70, 40, 70],
-    }).then(() =>
-      self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((list) => {
-        list.forEach((c) => c.postMessage({ type: "party-alert" }));
-      }),
-    ),
+    (async () => {
+      const list = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+      list.forEach((c) => c.postMessage({ type: "party-alert" }));
+      await self.registration.showNotification("J-Bmap", {
+        body: "",
+        tag: "jb-party",
+        icon: "/icon-192.png",
+        badge: "/icon-192.png",
+        silent: true,
+      });
+      const notes = await self.registration.getNotifications({ tag: "jb-party" });
+      notes.forEach((n) => n.close());
+    })(),
   );
 });
 

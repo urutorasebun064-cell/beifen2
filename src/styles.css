@@ -109,3 +109,10 @@
   animation: time-blink 0.85s ease-in-out infinite;
   color: #c45c2a;
 }
+
+.backdrop-blur-md,
+.backdrop-blur,
+.backdrop-blur-sm {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}

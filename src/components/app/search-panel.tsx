@@ -7,7 +7,7 @@ import { railsMatch } from "@/lib/rail/yahoo";
 import { planJourney, stationKey, ensureConnections } from "@/lib/rail/route";
 import { departuresAt } from "@/lib/rail/schedule";
 import { FIRST_MIN, isNightService, lineSlots, minutesUntilDepart, stopFrac } from "@/lib/rail/simulate";
-import { snapToRoad, onRoads } from "@/lib/roads";
+import { snapToRoad } from "@/lib/roads";
 import { lockJourneyTrain } from "@/components/app/route-panel";
 import { attachTrack, locateStation, resolveStationQuery } from "@/lib/rail/graph";
 import type { Journey, LineRuntime, RouteLeg, RouteStop, StationHit, Train } from "@/lib/rail/types";
@@ -1263,9 +1263,7 @@ export function SearchPanel() {
   );
 }
 
-let geoWatch = 0;
 let headingWatch = false;
-let lastRaw: { lng: number; lat: number } | null = null;
 
 function startHeading() {
   if (headingWatch || typeof window === "undefined") return;
@@ -1318,7 +1316,6 @@ export function locateUser(fly: boolean) {
       useMapStore.getState().setUserLocation(NODA, "outside");
       return;
     }
-    lastRaw = { lng, lat };
     const snapped = snapToRoad(lng, lat, 16);
     if (snapped) {
       lng = snapped.lng;
@@ -1337,18 +1334,8 @@ export function locateUser(fly: boolean) {
     (err) => {
       goNoda(err.code === 1 ? "denied" : "error");
     },
-    { enableHighAccuracy: true, timeout: 12000, maximumAge: 1000 },
+    fly
+      ? { enableHighAccuracy: true, timeout: 12000, maximumAge: 8000 }
+      : { enableHighAccuracy: false, timeout: 10000, maximumAge: 180000 },
   );
-  if (!geoWatch) {
-    geoWatch = navigator.geolocation.watchPosition(apply, () => undefined, {
-      enableHighAccuracy: true,
-      maximumAge: 800,
-      timeout: 12000,
-    });
-    onRoads(() => {
-      if (!lastRaw) return;
-      const snapped = snapToRoad(lastRaw.lng, lastRaw.lat, 16);
-      if (snapped) useMapStore.getState().setUserLocation(snapped, "ok");
-    });
-  }
 }

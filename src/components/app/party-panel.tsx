@@ -562,10 +562,27 @@ export function PartyWindow() {
       }
     };
     void load();
-    const id = window.setInterval(load, 1800);
+    let id = 0;
+    const arm = () => {
+      window.clearInterval(id);
+      id = 0;
+      if (document.visibilityState === "visible") id = window.setInterval(load, 8000);
+    };
+    arm();
+    const onVis = () => {
+      if (document.visibilityState === "visible") {
+        arm();
+        void load();
+      } else {
+        window.clearInterval(id);
+        id = 0;
+      }
+    };
+    document.addEventListener("visibilitychange", onVis);
     return () => {
       live = false;
       window.clearInterval(id);
+      document.removeEventListener("visibilitychange", onVis);
     };
   }, [open, joined]);
 
@@ -663,8 +680,15 @@ export function PartyWindow() {
       }
     };
     void pull();
-    const id = window.setInterval(pull, 700);
+    let id = 0;
+    const arm = () => {
+      window.clearInterval(id);
+      id = 0;
+      if (document.visibilityState === "visible") id = window.setInterval(pull, 900);
+    };
+    arm();
     const onShow = () => {
+      arm();
       if (document.visibilityState === "visible") void pull();
     };
     document.addEventListener("visibilitychange", onShow);

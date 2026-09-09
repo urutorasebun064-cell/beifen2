@@ -3304,6 +3304,7 @@ export function CanvasMap() {
   const camRef = useRef<Cam>({ lng: RADAR_JAPAN_LNG, lat: RADAR_JAPAN_LAT, zoom: RADAR_JAPAN_ZOOM, yaw: 0, tilt: 0.42 });
   const camLerpRef = useRef<CamLerp | null>(null);
   const introDoneRef = useRef(false);
+  const wakeRef = useRef<() => void>(() => {});
   const [tiltUi, setTiltUi] = useState(0.42);
   const [zoomUi, setZoomUi] = useState(RADAR_JAPAN_ZOOM);
   const lineRef = useRef<LineRuntime[]>([]);
@@ -3344,6 +3345,11 @@ export function CanvasMap() {
     if (!ctx) return;
 
     let raf = 0;
+    let running = false;
+    let dirty = true;
+    let kick = () => {
+      dirty = true;
+    };
     let lastSim = 0;
     let lastCount = -1;
     let lastFly = -1;
@@ -3389,6 +3395,7 @@ export function CanvasMap() {
       applyTransform(ctx, sizeRef.current.dpr);
       applyTransform(bg, sizeRef.current.dpr);
       baseKey = "";
+      kick();
     };
     resize();
     const ro = new ResizeObserver(resize);
@@ -3619,8 +3626,18 @@ export function CanvasMap() {
     };
 
     const draw = (ts: number) => {
-      raf = requestAnimationFrame(draw);
-      if (typeof document !== "undefined" && document.hidden) return;
+      raf = 0;
+      if (typeof document !== "undefined" && document.hidden) {
+        running = false;
+        return;
+      }
+      const keep =
+        !introDoneRef.current || Boolean(camLerpRef.current) || Boolean(drag.current) || Boolean(useMapStore.getState().followTrainId);
+      if (!dirty && !keep) {
+        running = false;
+        return;
+      }
+      dirty = false;
       try {
         if (!bootHid) {
           bootHid = true;
@@ -4498,8 +4515,21 @@ export function CanvasMap() {
       } catch {
         /* keep looping */
       }
+      if (dirty || !introDoneRef.current || camLerpRef.current || drag.current || useMapStore.getState().followTrainId) {
+        running = true;
+        raf = requestAnimationFrame(draw);
+      } else {
+        running = false;
+      }
     };
-    raf = requestAnimationFrame(draw);
+    kick = () => {
+      dirty = true;
+      if (running || document.hidden) return;
+      running = true;
+      raf = requestAnimationFrame(draw);
+    };
+    wakeRef.current = kick;
+    kick();
 
     const pointers = new Map<number, { x: number; y: number }>();
     let mapGesture = false;
@@ -4818,6 +4848,7 @@ export function CanvasMap() {
 
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
+      kick();
       breakAuto();
       const rect = canvas.getBoundingClientRect();
       const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 800 : 1;
@@ -4838,6 +4869,7 @@ export function CanvasMap() {
     };
 
     const onPointerDown = (e: PointerEvent) => {
+      kick();
       canvas.setPointerCapture(e.pointerId);
       pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
       camLerpRef.current = null;
@@ -4875,6 +4907,7 @@ export function CanvasMap() {
     };
 
     const onPointerMove = (e: PointerEvent) => {
+      kick();
       if (!pointers.has(e.pointerId)) return;
       pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
       const d = drag.current;
@@ -4946,6 +4979,7 @@ export function CanvasMap() {
     };
 
     const onPointerUp = (e: PointerEvent) => {
+      kick();
       const start = pointers.get(e.pointerId);
       pointers.delete(e.pointerId);
       if (pointers.size < 2 && drag.current?.pinching) drag.current = null;
@@ -4974,6 +5008,7 @@ export function CanvasMap() {
 
     const onDblClick = (e: MouseEvent) => {
       e.preventDefault();
+      kick();
       lastTap = 0;
       window.clearTimeout(pickTimer);
       const rect = canvas.getBoundingClientRect();
@@ -4985,6 +5020,7 @@ export function CanvasMap() {
         if (pointers.size > 0) hoverIdRef.current = null;
         return;
       }
+      kick();
       const rect = canvas.getBoundingClientRect();
       const sx = e.clientX - rect.left;
       const sy = e.clientY - rect.top;
@@ -5011,6 +5047,20 @@ export function CanvasMap() {
 
     const onContextMenu = (e: Event) => e.preventDefault();
 
+    const onVis = () => {
+      if (document.visibilityState === "visible") kick();
+    };
+    document.addEventListener("visibilitychange", onVis);
+    const unsub = useMapStore.subscribe((s, prev) => {
+      for (const key of Object.keys(s) as Array<keyof typeof s>) {
+        if (key === "clock" || key === "viewTime") continue;
+        if (s[key] !== prev[key]) {
+          kick();
+          return;
+        }
+      }
+    });
+
     canvas.addEventListener("wheel", onWheel, { passive: false });
     canvas.addEventListener("pointerdown", onPointerDown);
     canvas.addEventListener("pointermove", onPointerMove);
@@ -5022,6 +5072,9 @@ export function CanvasMap() {
 
     return () => {
       cancelAnimationFrame(raf);
+      running = false;
+      unsub();
+      document.removeEventListener("visibilitychange", onVis);
       ro.disconnect();
       window.clearTimeout(pickTimer);
       canvas.removeEventListener("wheel", onWheel);
@@ -5044,6 +5097,7 @@ export function CanvasMap() {
     camLerpRef.current = null;
     const cam = camRef.current;
     camRef.current = { ...cam, yaw: cam.yaw + dir * 0.16 };
+    wakeRef.current();
   };
   const goSelf = () => {
     const { w, h } = sizeRef.current;
@@ -5063,9 +5117,11 @@ export function CanvasMap() {
       setTiltUi(HOME_TILT);
       setZoomUi(z);
       pullRoads(user.lng, user.lat, z);
+      wakeRef.current();
       return;
     }
     locateUser(true);
+    wakeRef.current();
   };
   const applyZoom = (raw: number) => {
     useMapStore.getState().setFollowTrainId(null);
@@ -5075,6 +5131,7 @@ export function CanvasMap() {
     const dest = zoomTowardPoint(camRef.current, w / 2, h / 2, w, h, z);
     camRef.current = dest;
     setZoomUi(z);
+    wakeRef.current();
   };
   const applyTilt = (raw: number) => {
     useMapStore.getState().setFollowTrainId(null);
@@ -5082,6 +5139,7 @@ export function CanvasMap() {
     const v = clampTilt(raw);
     camRef.current.tilt = v;
     setTiltUi(v);
+    wakeRef.current();
   };
 
   return (

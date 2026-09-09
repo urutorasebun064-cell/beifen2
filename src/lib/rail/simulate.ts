@@ -172,6 +172,7 @@ export function minutesUntilStation(line: LineRuntime, minutes: number, dir: 0 |
 function trainPose(line: LineRuntime, minutes: number, dir: 0 | 1, i: number, weekday = "Mon"): { t: number; dwellIdx: number } {
   const { oneWayMin } = lineSlots(line, minutes, weekday);
   const t0 = trainProgress(line, minutes, dir, i, weekday);
+  if (line.kind === "shinkansen") return { t: t0, dwellIdx: -1 };
   const dwellFrac = 0.32 / Math.max(1, oneWayMin);
   let dwellIdx = -1;
   for (let s = 0; s < line.stops.length; s++) {
@@ -702,6 +703,7 @@ export function simulateTrains(
   }
   if (zoom >= 10) {
     for (const line of visible) {
+      if (line.kind === "shinkansen") continue;
       if (trains.length >= cap) break;
       for (const t of trainsOnVisibleSpan(line, minutes, weekday, bounds, pad, zoom, trains)) {
         if (trains.length >= cap) break;

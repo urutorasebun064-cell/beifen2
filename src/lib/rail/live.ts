@@ -250,18 +250,20 @@ export function mergeLive(sim: Train[], live: Train[]): Train[] {
       out.push(lv);
       continue;
     }
-    let best: Train | null = null;
-    let bestD = lv.kind === "shinkansen" ? 18 : 1.6;
+    let best: Train | null = sim.find((s) => s.id === lv.id && s.kind !== "flight" && !used.has(s.id)) ?? null;
+    let bestD = best ? 0 : lv.kind === "shinkansen" ? 4 : 1.6;
+    if (!best) {
     for (const s of sim) {
       if (used.has(s.id) || s.kind === "flight") continue;
       if (lv.lineId && s.lineId !== lv.lineId) continue;
       if (lv.dir !== s.dir) continue;
-      const cap = s.kind === "shinkansen" || lv.kind === "shinkansen" ? 18 : 1.6;
+      const cap = s.kind === "shinkansen" || lv.kind === "shinkansen" ? 4 : 1.6;
       const d = Math.hypot((s.lng - lv.lng) * 91, (s.lat - lv.lat) * 111);
       if (d <= cap && d < bestD) {
         bestD = d;
         best = s;
       }
+    }
     }
     if (best) {
       used.add(best.id);
@@ -343,6 +345,8 @@ export function mergeLive(sim: Train[], live: Train[]): Train[] {
         gtfsStatus: lv.gtfsStatus,
         gps: liveGps || best.gps,
       });
+    } else if (lv.kind === "shinkansen" && lv.gps !== true) {
+      continue;
     } else {
       out.push(lv);
     }

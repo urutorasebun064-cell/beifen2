@@ -3116,7 +3116,6 @@ export function CanvasMap() {
   const liveSmoothRef = useRef<Map<string, LiveTrack>>(new Map());
   const walkRef = useRef({ lng: 0, lat: 0, set: false, hdg: 0 });
   const lastLiveSnapRef = useRef<Train[] | null>(null);
-  const lastPinRef = useRef<Train | null>(null);
   const wxPoolRef = useRef<WxParticle[]>([]);
   const lastWxTsRef = useRef(0);
   const sizeRef = useRef({ w: 1, h: 1, dpr: 1 });
@@ -3612,13 +3611,10 @@ export function CanvasMap() {
           const cap = z < 5.5 ? 0 : z >= 15.6 ? 2200 : z >= 13.8 ? 1600 : z >= 12 ? 1400 : z >= 10 ? 1100 : z >= 8 ? 800 : 420;
           const liveRaw = useMapStore.getState().viewTime ? [] : useMapStore.getState().liveTrains;
           const flights = liveRaw.filter((t) => t.kind === "flight");
-          const pin = getPinnedTrain();
-          const extra = pin && pin.kind !== "flight" && pin.kind !== "bus" ? [pin] : [];
-          const snap = flights.concat(extra);
-          const fresh = lastLiveSnapRef.current !== liveRaw || pin !== lastPinRef.current;
+          const snap = flights;
+          const fresh = lastLiveSnapRef.current !== liveRaw;
           if (fresh) {
             lastLiveSnapRef.current = liveRaw;
-            lastPinRef.current = pin;
           }
           const live = smoothLiveOnTrack(liveSmoothRef.current, fresh ? snap : null, lineRef.current, ts);
           let sim = simulateTrains(lineRef.current, now, bounds, z, cap, followId, priority, false);
@@ -3630,7 +3626,29 @@ export function CanvasMap() {
             const line = lineRef.current.find((l) => l.id === t.lineId);
             return line ? poseWithDelay(line, t, t.delayMin, now) : t;
           });
-          trainsRef.current = mergeLive(sim, live).filter((t) => t.kind !== "bus");
+          const merged = mergeLive(sim, live).filter((t) => t.kind !== "bus");
+          const pin = getPinnedTrain(lineRef.current);
+          if (pin && pin.gps && pin.kind !== "flight" && pin.kind !== "bus") {
+            const i = merged.findIndex((t) => t.id === pin.id);
+            if (i >= 0) {
+              merged[i] = {
+                ...merged[i]!,
+                lng: pin.lng,
+                lat: pin.lat,
+                bearing: pin.bearing,
+                progress: pin.progress,
+                gps: true,
+                liveLate: pin.liveLate,
+                posStatus: pin.posStatus ?? "live",
+                delayMin: Math.max(merged[i]!.delayMin, pin.delayMin),
+                delaySec: Math.max(merged[i]!.delaySec ?? 0, pin.delaySec ?? 0),
+                delayAlert: Boolean(merged[i]!.delayAlert || pin.delayAlert),
+              };
+            } else {
+              merged.push(pin);
+            }
+          }
+          trainsRef.current = merged;
           const trip = useMapStore.getState().journey;
           if (trip) {
             trainsRef.current = relatedTrainsForJourney(

@@ -1,6 +1,8 @@
 import { liveToTrains, nearestOnPath, railDriftKm, type LivePayload } from "./live";
 import { ingestLiveTracks, sampleLiveTracks, type LiveTrack } from "./track-lerp";
 import { stampTrainsDia, type YahooDiaDelay } from "./yahoo";
+import { pointAlong } from "./geo";
+import { operationOf } from "@/data/jr-ops";
 import type { LineRuntime, Train } from "./types";
 
 const INTERVAL_MS = 20_000;
@@ -8,18 +10,45 @@ const TIMEOUT_MS = 10_000;
 const PIN_TTL = 180_000;
 
 let officialDia: YahooDiaDelay[] = [];
-let pinned: { t: Train; at: number } | null = null;
+let pinned: { t: Train; at: number; progress: number } | null = null;
 
-export function getOfficialDia(): YahooDiaDelay[] {
-  return officialDia;
-}
-
-export function getPinnedTrain(): Train | null {
+function coastPinned(lines: LineRuntime[]): Train | null {
   if (!pinned) return null;
   if (Date.now() - pinned.at > PIN_TTL) {
     pinned = null;
     return null;
   }
+  const t = pinned.t;
+  const line = lines.find((l) => l.id === t.lineId);
+  if (!line || t.kind === "flight" || t.kind === "bus") return t;
+  const elapsedH = (Date.now() - pinned.at) / 3_600_000;
+  const speed = Math.max(80, operationOf(line).speed);
+  const sign = t.dir === 1 && !line.loop ? -1 : 1;
+  let p = pinned.progress + (sign * speed * elapsedH) / Math.max(1, line.totalKm);
+  if (!line.loop) p = Math.max(0, Math.min(1, p));
+  else p = ((p % 1) + 1) % 1;
+  const pose = pointAlong(line.path, line.cum, line.totalKm, p);
+  const bearing = t.dir === 1 && !line.loop ? (pose.bearing + 180) % 360 : pose.bearing;
+  return {
+    ...t,
+    lng: pose.coord[0],
+    lat: pose.coord[1],
+    bearing,
+    progress: p,
+  };
+}
+
+export function getOfficialDia(): YahooDiaDelay[] {
+  return officialDia;
+}
+
+export function getPinnedTrain(lines?: LineRuntime[]): Train | null {
+  if (!pinned) return null;
+  if (Date.now() - pinned.at > PIN_TTL) {
+    pinned = null;
+    return null;
+  }
+  if (lines?.length) return coastPinned(lines);
   return pinned.t;
 }
 
@@ -89,7 +118,7 @@ export async function pinLivePosition(train: Train, lines: LineRuntime[], odptKe
     const mapped = stampTrainsDia(liveToTrains(lines, data.trains ?? []), data.dia ?? []);
     const hit = mapped.find((t) => t.kind !== "flight" && t.kind !== "bus") ?? mapped[0];
     if (!hit || hit.kind === "flight") {
-      pinned = { t: fallback, at: Date.now() };
+      pinned = { t: fallback, at: Date.now(), progress: train.progress };
       return fallback;
     }
     const line = lines.find((l) => l.id === train.lineId) ?? lines.find((l) => l.id === hit.lineId);
@@ -99,6 +128,7 @@ export async function pinLivePosition(train: Train, lines: LineRuntime[], odptKe
     let lng = hit.lng;
     let lat = hit.lat;
     let bearing = hit.bearing;
+    let progress = train.progress;
     let liveLate = false;
     if (gps && line) {
       const km = railDriftKm(line, hit.lng, hit.lat);
@@ -108,11 +138,18 @@ export async function pinLivePosition(train: Train, lines: LineRuntime[], odptKe
         lng = train.lng;
         lat = train.lat;
         bearing = train.bearing;
-      } else if (delayMin <= 0 && (train.delaySec ?? 0) <= 0 && !train.delayAlert && !hit.delayAlert) {
-        const simKm = nearestOnPath(line, train.lng, train.lat).km;
-        const gpsKm = nearestOnPath(line, lng, lat).km;
-        const lagKm = train.dir === 1 ? gpsKm - simKm : simKm - gpsKm;
-        if (lagKm > 0.7) liveLate = true;
+        progress = train.progress;
+      } else {
+        const snap = nearestOnPath(line, hit.lng, hit.lat);
+        progress = snap.t;
+        lng = snap.coord[0];
+        lat = snap.coord[1];
+        bearing = train.dir === 1 && !line.loop ? (snap.bearing + 180) % 360 : snap.bearing;
+        if (delayMin <= 0 && (train.delaySec ?? 0) <= 0 && !train.delayAlert && !hit.delayAlert) {
+          const simKm = nearestOnPath(line, train.lng, train.lat).km;
+          const lagKm = train.dir === 1 ? snap.km - simKm : simKm - snap.km;
+          if (lagKm > 0.7) liveLate = true;
+        }
       }
     }
     const next: Train = {
@@ -120,6 +157,7 @@ export async function pinLivePosition(train: Train, lines: LineRuntime[], odptKe
       lng,
       lat,
       bearing,
+      progress,
       delayMin,
       delaySec,
       delayAlert: Boolean(train.delayAlert || hit.delayAlert || delayMin > 0),
@@ -129,10 +167,10 @@ export async function pinLivePosition(train: Train, lines: LineRuntime[], odptKe
       dest: hit.dest || train.dest,
       etaMin: hit.etaMin ?? train.etaMin,
     };
-    pinned = { t: next, at: Date.now() };
+    pinned = { t: next, at: Date.now(), progress };
     return next;
   } catch {
-    pinned = { t: fallback, at: Date.now() };
+    pinned = { t: fallback, at: Date.now(), progress: train.progress };
     return fallback;
   }
 }

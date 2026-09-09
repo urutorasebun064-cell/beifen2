@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { LocateFixed, RotateCcw, RotateCw } from "lucide-react";
 import { AIRPORT_BY_ID, AIRPORTS, FLIGHT_ROUTES } from "@/data/flights";
 import { CITY_MARKS, JAPAN_LAND, JAPAN_WATER, cityMinZoom } from "@/data/japan-land";
@@ -35,7 +35,7 @@ import { drawRoads, pullRoads, SHOW_ZOOM } from "@/lib/roads";
 import { STAYS, stayLabel } from "@/data/stays";
 import { PEAKS, FUJI_H, peakLabel, type Peak } from "@/data/peaks";
 import { useMapStore, simNow } from "@/store/map-store";
-import { patchSave, readSave } from "@/lib/save-sync";
+import { patchSave } from "@/lib/save-sync";
 
 type Cam = { lng: number; lat: number; zoom: number; yaw: number; tilt: number };
 
@@ -158,41 +158,6 @@ function keepJapanInView(cam: Cam) {
 
 const CAM_KEY = "jb-cam";
 let camSaveAt = 0;
-
-function readSessionCam(): Cam | null {
-  try {
-    const raw = sessionStorage.getItem(CAM_KEY);
-    if (raw) {
-      const v = JSON.parse(raw) as Cam;
-      if (inJapan(v.lng, v.lat) && Number.isFinite(v.zoom)) {
-        return {
-          lng: v.lng,
-          lat: v.lat,
-          zoom: clampZoom(v.zoom),
-          yaw: Number.isFinite(v.yaw) ? v.yaw : 0,
-          tilt: Number.isFinite(v.tilt) ? clampTilt(v.tilt) : HOME_TILT,
-        };
-      }
-    }
-  } catch {
-    /* */
-  }
-  try {
-    const cam = readSave()?.cam;
-    if (cam && inJapan(cam.lng, cam.lat) && Number.isFinite(cam.zoom)) {
-      return {
-        lng: cam.lng,
-        lat: cam.lat,
-        zoom: clampZoom(cam.zoom),
-        yaw: Number.isFinite(cam.yaw) ? cam.yaw : 0,
-        tilt: Number.isFinite(cam.tilt) ? clampTilt(cam.tilt) : HOME_TILT,
-      };
-    }
-  } catch {
-    /* */
-  }
-  return null;
-}
 
 function rememberCam(cam: Cam) {
   const now = Date.now();
@@ -1171,7 +1136,10 @@ function overlaySelectedTrain(list: Train[], sel: Train | null) {
   return list;
 }
 
-let segsCache: { key: string; segs: { color: string; pts: [number, number][]; walk: boolean; minutes?: number; shop?: boolean }[] } = {
+let segsCache: {
+  key: string;
+  segs: { color: string; pts: [number, number][]; walk: boolean; minutes?: number; shop?: boolean; clip?: boolean }[];
+} = {
   key: "",
   segs: [],
 };
@@ -1343,17 +1311,26 @@ function airGlowPath(fromName: string, toName: string, from: { lng: number; lat:
   return out;
 }
 
+function slimPath(pts: [number, number][]) {
+  if (pts.length <= 140) return pts;
+  const step = Math.ceil(pts.length / 120);
+  const out: [number, number][] = [pts[0]!];
+  for (let i = step; i < pts.length - 1; i += step) out.push(pts[i]!);
+  out.push(pts[pts.length - 1]!);
+  return out;
+}
+
 function remainingJourneySegs(lines: LineRuntime[]) {
   const store = useMapStore.getState();
   const journey = store.journey;
   const train = store.selectedTrain;
-  const segs: { color: string; pts: [number, number][]; walk: boolean; minutes?: number; shop?: boolean }[] = [];
+  const segs: { color: string; pts: [number, number][]; walk: boolean; minutes?: number; shop?: boolean; clip?: boolean }[] = [];
   const index = store.stationIndex;
   const here = store.userLocation;
   const key = journey
-    ? `j:${journey.origin.name}|${journey.dest.name}|${journey.departHhmm}|${journey.arriveHhmm}|${journey.legs.map((l) => `${l.kind}:${l.from.name}>${l.to.name}`).join(",")}|${store.stayWalk ? 1 : 0}|${store.mateWalk ? 1 : 0}|${train?.id ?? ""}|${train ? train.lng.toFixed(3) : ""}|${here ? here.lng.toFixed(3) : ""}|${here ? here.lat.toFixed(3) : ""}|${lines.length}`
+    ? `j:${journey.origin.name}|${journey.dest.name}|${journey.departHhmm}|${journey.arriveHhmm}|${journey.legs.map((l) => `${l.kind}:${l.from.name}>${l.to.name}`).join(",")}|${store.stayWalk ? 1 : 0}|${store.mateWalk ? 1 : 0}|${train?.id ?? ""}|${here ? here.lng.toFixed(2) : ""}|${here ? here.lat.toFixed(2) : ""}|${lines.length}`
     : train && train.kind !== "flight"
-      ? `t:${train.id}|${train.dest}|${train.lng.toFixed(3)}|${train.lat.toFixed(3)}|${lines.length}`
+      ? `t:${train.id}|${train.dest}|${lines.length}`
       : "";
   if (key && key === segsCache.key) return segsCache.segs;
 
@@ -1375,8 +1352,7 @@ function remainingJourneySegs(lines: LineRuntime[]) {
       return segs;
     }
     let pts = sliceRailPath(line, { lng: train.lng, lat: train.lat }, dest);
-    if (pts.length >= 2) pts = clipFromTrain(pts, train.lng, train.lat);
-    if (pts.length >= 2) segs.push({ color: train.color, pts, walk: false });
+    if (pts.length >= 2) segs.push({ color: train.color, pts: slimPath(pts), walk: false, clip: true });
     segsCache = { key, segs };
     return segs;
   }
@@ -1413,6 +1389,7 @@ function remainingJourneySegs(lines: LineRuntime[]) {
     const to = locateStation(leg.to.name, lines, index, leg.to);
     let line: LineRuntime | null = null;
     let pts: [number, number][] = [];
+    let clip = false;
     if (isAirLeg(leg)) {
       pts = airGlowPath(leg.from.name, leg.to.name, from, to);
     } else {
@@ -1463,11 +1440,7 @@ function remainingJourneySegs(lines: LineRuntime[]) {
           ? haversine([fromPt.lng, fromPt.lat], [destPt.lng, destPt.lat])
           : haversine([from.lng, from.lat], [to.lng, to.lat]);
       if (pts.length >= 2 && hop > 0.4 && pathLenKm(pts) > hop * 2.2 + 10) pts = [];
-      if (pts.length >= 2 && train && train.kind !== "flight" && lineMatchesLeg(train, leg) && sameWay(train, leg, lines)) {
-        const near = nearestPathIndex(pts, train.lng, train.lat);
-        const d = haversine(pts[near] ?? pts[0]!, [train.lng, train.lat]);
-        if (d < 1.2) pts = clipFromTrain(pts, train.lng, train.lat);
-      }
+      clip = Boolean(pts.length >= 2 && train && train.kind !== "flight" && line && lineMatchesLeg(train, leg) && sameWay(train, leg, lines));
     }
     if (pts.length < 2 && shopTrip) {
       pts = [
@@ -1476,7 +1449,7 @@ function remainingJourneySegs(lines: LineRuntime[]) {
       ];
     }
     if (pts.length < 2) continue;
-    segs.push({ color: line?.color || leg.color || CREAM, pts, walk: false });
+    segs.push({ color: line?.color || leg.color || CREAM, pts: slimPath(pts), walk: false, clip });
   }
   segsCache = { key, segs };
   return segs;
@@ -1523,7 +1496,8 @@ function drawJourneyPulse(
   const segs = remainingJourneySegs(lines).filter((seg) => kind === "all" || (kind === "walk" ? seg.walk : !seg.walk));
   if (!segs.length) return;
   const pulse = 0.5 + 0.5 * (0.5 + 0.5 * Math.sin(ts / 260));
-  const minPx = cam.zoom >= 14.6 ? 1.4 : cam.zoom >= 12.4 ? 2.2 : 3.2;
+  const minPx = cam.zoom >= 14.6 ? 2.2 : cam.zoom >= 12.4 ? 3.2 : 4.8;
+  const train = useMapStore.getState().selectedTrain;
   g.save();
   g.lineCap = "round";
   g.lineJoin = "round";
@@ -1541,15 +1515,22 @@ function drawJourneyPulse(
       }
       continue;
     }
+    let pts = seg.pts;
+    if (seg.clip && train && train.kind !== "flight") {
+      const near = nearestPathIndex(pts, train.lng, train.lat);
+      const d = haversine(pts[near] ?? pts[0]!, [train.lng, train.lat]);
+      if (d < 1.2) pts = clipFromTrain(pts, train.lng, train.lat);
+    }
+    if (pts.length < 2) continue;
     const path = new Path2D();
-    addPoly(path, seg.pts, cam, w, h, minPx);
-    g.globalAlpha = 0.42 + 0.38 * pulse;
-    g.strokeStyle = "rgba(255, 226, 120, 0.92)";
-    g.lineWidth = 13 + 6 * pulse;
+    addPoly(path, pts, cam, w, h, minPx);
+    g.globalAlpha = 0.28 + 0.22 * pulse;
+    g.strokeStyle = "rgba(255, 226, 120, 0.8)";
+    g.lineWidth = 6.2;
     g.stroke(path);
-    g.globalAlpha = 0.88 + 0.12 * pulse;
+    g.globalAlpha = 0.9;
     g.strokeStyle = seg.color;
-    g.lineWidth = 5.2 + 2.2 * pulse;
+    g.lineWidth = 3.1;
     g.stroke(path);
   }
   const delay = delaySeconds(useMapStore.getState().selectedTrain) || Math.round((useMapStore.getState().journey?.delayMin ?? 0) * 60);
@@ -3300,15 +3281,6 @@ export function CanvasMap() {
   const introDoneRef = useRef(false);
   const [tiltUi, setTiltUi] = useState(0.42);
   const [zoomUi, setZoomUi] = useState(RADAR_JAPAN_ZOOM);
-
-  useLayoutEffect(() => {
-    const saved = readSessionCam();
-    if (!saved) return;
-    camRef.current = saved;
-    introDoneRef.current = true;
-    setZoomUi(saved.zoom);
-    setTiltUi(saved.tilt);
-  }, []);
   const lineRef = useRef<LineRuntime[]>([]);
   const trainsRef = useRef<Train[]>([]);
   const hoverIdRef = useRef<string | null>(null);

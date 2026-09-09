@@ -1283,15 +1283,17 @@ function glowOnLine(line: LineRuntime, fromName: string, toName: string, toLng: 
 }
 
 function isAirLeg(leg: RouteLeg) {
-  const n = `${leg.lineName ?? ""} ${leg.from.name} ${leg.to.name}`;
-  return /JAL|ANA|JTA|FDA|IBX|SKY|APJ|SNA|便線|空路|飛行機|Airline/i.test(n) || ((/空港/.test(leg.from.name) || /空港/.test(leg.to.name)) && leg.minutes >= 35);
+  const n = `${leg.lineName ?? ""} ${leg.trainType ?? ""}`;
+  if (/JAL|ANA|JTA|FDA|IBX|APJ|Peach|Jetstar|StarFlyer|AIRDO|ソラシド|フジドリーム|アイベックス|スカイマーク|ピーチ|ジェットスター|空路|飛行機|Airline|航空/i.test(n)) return true;
+  if (/\b(NH|JL|MM|BC|NQ|FW|JH|6J|7G)\s?\d{1,4}\b/i.test(n)) return true;
+  return false;
 }
 
 function airportOf(name: string) {
   const n = stopKey(name);
   if (!n) return null;
-  const hit = AIRPORTS.find((a) => n.includes(a.n) || a.n.includes(n.replace(/国際.*$/u, "").replace(/空港.*$/u, "")));
-  return hit ?? null;
+  if (!/空港|エアポート|airport/i.test(name)) return null;
+  return AIRPORTS.find((a) => a.n.length >= 2 && (n.includes(`${a.n}空港`) || n.includes(a.n))) ?? null;
 }
 
 function airGlowPath(fromName: string, toName: string, from: { lng: number; lat: number }, to: { lng: number; lat: number }): [number, number][] {
@@ -1396,8 +1398,12 @@ function remainingJourneySegs(lines: LineRuntime[]) {
       const prefer = preferLineName(leg.lineName ?? "");
       const destPt = realStopOf(lines, leg.to.name);
       const fromPt = realStopOf(lines, leg.from.name);
-      line = lineWithBoth(lines, leg.from.name, leg.to.name, leg.lineName ?? "");
-      pts = rideGlowPath(line, leg.from.name, leg.to.name);
+      const hinted = { ...leg, from, to };
+      line = findLineForLeg(lines, index, hinted) ?? lineWithBoth(lines, leg.from.name, leg.to.name, leg.lineName ?? "");
+      if (line) {
+        const sliced = sliceRailPath(line, from, to);
+        pts = sliced.length >= 2 ? sliced : rideGlowPath(line, leg.from.name, leg.to.name);
+      }
       if (pts.length < 2) {
         const named = prefer ? lines.filter((l) => linePrefers(l, prefer)) : [];
         const exact = lines.filter((l) => {
@@ -1422,6 +1428,13 @@ function remainingJourneySegs(lines: LineRuntime[]) {
           }
         }
       }
+      if (pts.length < 2 && leg.path && leg.path.length >= 2) pts = leg.path.slice();
+      if (pts.length < 2 && leg.stops?.length >= 2) {
+        const via = leg.stops
+          .filter((s) => Number.isFinite(s.lng) && Number.isFinite(s.lat))
+          .map((s) => [s.lng, s.lat] as [number, number]);
+        if (via.length >= 2) pts = via;
+      }
       if (pts.length >= 2 && line) {
         const last = pts[pts.length - 1]!;
         let endName = "";
@@ -1439,7 +1452,12 @@ function remainingJourneySegs(lines: LineRuntime[]) {
         fromPt && destPt
           ? haversine([fromPt.lng, fromPt.lat], [destPt.lng, destPt.lat])
           : haversine([from.lng, from.lat], [to.lng, to.lat]);
-      if (pts.length >= 2 && hop > 0.4 && pathLenKm(pts) > hop * 2.2 + 10) pts = [];
+      if (pts.length >= 2 && hop > 0.4 && line?.kind !== "shinkansen" && pathLenKm(pts) > hop * 4 + 40) pts = [];
+      if (pts.length < 2) {
+        const a = airportOf(leg.from.name);
+        const b = airportOf(leg.to.name);
+        if (a && b && a.id !== b.id && hop > 80) pts = airGlowPath(leg.from.name, leg.to.name, from, to);
+      }
       clip = Boolean(pts.length >= 2 && train && train.kind !== "flight" && line && lineMatchesLeg(train, leg) && sameWay(train, leg, lines));
     }
     if (pts.length < 2 && shopTrip) {

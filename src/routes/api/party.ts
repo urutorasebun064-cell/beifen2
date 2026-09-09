@@ -278,11 +278,20 @@ function mergeRoom(key: string, incoming: Room) {
     }
     have.id = have.id || m.id;
     have.push = m.push || have.push;
-    if ((m.pinAt || 0) >= (have.pinAt || 0) && Number.isFinite(m.lng) && Number.isFinite(m.lat)) {
-      have.lng = m.lng;
-      have.lat = m.lat;
-      have.pinAt = m.pinAt;
-      if (m.near) have.near = m.near;
+    const incomingPin = Number(m.pinAt) || 0;
+    const havePin = Number(have.pinAt) || 0;
+    if (incomingPin >= havePin) {
+      if (Number.isFinite(m.lng) && Number.isFinite(m.lat)) {
+        have.lng = m.lng;
+        have.lat = m.lat;
+        have.pinAt = incomingPin;
+        if (m.near) have.near = m.near;
+      } else if (incomingPin > 0) {
+        have.lng = undefined;
+        have.lat = undefined;
+        have.near = undefined;
+        have.pinAt = incomingPin;
+      }
     }
   }
   collapseMembers(cur);
@@ -957,7 +966,7 @@ export const Route = createFileRoute("/api/party")({
           me.lng = undefined;
           me.lat = undefined;
           me.near = undefined;
-          me.pinAt = undefined;
+          me.pinAt = Date.now();
           await saveRoom(found.key, room);
           return json({ ok: true, ...publicOf(room, me.id, was), you: me.nick, youId: me.id, host: me.id === room.hostId });
         }

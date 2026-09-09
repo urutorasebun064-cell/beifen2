@@ -455,6 +455,7 @@ export function PartyWindow() {
   const tokenRef = useRef(token);
   const lastHeardRef = useRef(0);
   const pushBoundRef = useRef("");
+  const shareOffRef = useRef(false);
   passRef.current = pass;
   nickRef.current = nick;
   joinedRef.current = joined;
@@ -632,6 +633,12 @@ export function PartyWindow() {
             }
           }
           if (top) lastHeardRef.current = top;
+          if (shareOffRef.current && Array.isArray(data.members)) {
+            const mine = userId();
+            data.members = data.members.map((m) =>
+              m.id === mine || m.nick === nickRef.current ? { ...m, lng: undefined, lat: undefined, near: undefined } : m,
+            );
+          }
           setState(data);
           if (data.vapid && pushBoundRef.current !== tokenRef.current) {
             void bindPush(roomName, tokenRef.current, data.vapid).then((ok) => {
@@ -936,6 +943,7 @@ export function PartyWindow() {
               near,
             });
             if (res.ok && data.ok) {
+              shareOffRef.current = false;
               setState(data);
               useMapStore.getState().setPartyCollapsed(true);
               if (isInJapan(lng, lat)) {
@@ -972,7 +980,17 @@ export function PartyWindow() {
       token: tokenRef.current,
       nick: nickRef.current || nick,
     });
-    if (res.ok && data.ok) setState(data);
+    if (res.ok && data.ok) {
+      shareOffRef.current = true;
+      const mine = userId();
+      if (Array.isArray(data.members)) {
+        data.members = data.members.map((m) =>
+          m.id === mine ? { ...m, lng: undefined, lat: undefined, near: undefined } : m,
+        );
+      }
+      setState(data);
+      useMapStore.getState().setPartyPins(useMapStore.getState().partyPins.filter((p) => !p.mine));
+    }
   };
 
   const you = state?.you || nick;

@@ -351,7 +351,7 @@ export function transferLine(journey: Journey, t: Copy) {
     .join(" · ");
 }
 
-export function lockJourneyTrain(journey: Journey, opts?: { camera?: boolean }) {
+export function lockJourneyTrain(journey: Journey, opts?: { camera?: boolean; keepSheet?: boolean }) {
   const store = useMapStore.getState();
   const stamped = stampJourneyDelay(journey, store.liveTrains);
   if (stamped.delaySec || stamped.delayMin || stamped.delayAlert) {
@@ -366,8 +366,9 @@ export function lockJourneyTrain(journey: Journey, opts?: { camera?: boolean }) 
   }
   const ride = stamped.legs.find((l) => l.kind === "ride") ?? stamped.legs[0];
   if (!ride) return;
-  let pick = lockRide(ride);
-  if (pick && ride.kind === "ride" && rideWaiting(ride, simNow(), stamped.delayMin ?? 0)) {
+  const waiting = ride.kind === "ride" && rideWaiting(ride, simNow(), stamped.delayMin ?? 0);
+  let pick = lockRide(ride, { keepSheet: opts?.keepSheet ?? waiting });
+  if (pick && waiting) {
     pick = { ...pick, lng: ride.from.lng, lat: ride.from.lat };
     useMapStore.getState().selectTrain(pick);
   }
@@ -442,7 +443,7 @@ function pickTrainForLeg(leg: RouteLeg): Train | null {
   return placeTrainOnLeg(leg, line, path, simNow(), store.journey?.delayMin ?? 0);
 }
 
-function lockRide(leg: RouteLeg) {
+function lockRide(leg: RouteLeg, opts?: { keepSheet?: boolean }) {
   const store = useMapStore.getState();
   const pick = pickTrainForLeg(leg) ?? (leg.kind === "ride" ? fallbackTripTrain(leg) : null);
   if (pick) {
@@ -450,7 +451,7 @@ function lockRide(leg: RouteLeg) {
     store.selectStation(null);
     store.selectTrain(pick);
     store.setFollowTrainId(null);
-    store.setSheetOpen(false);
+    if (!opts?.keepSheet) store.setSheetOpen(false);
   }
   return pick;
 }

@@ -283,6 +283,8 @@ export async function applyTrip(origin: StationHit | { lng: number; lat: number 
     return;
   }
   const silent = Boolean(opts?.silent);
+  const skipCamera = Boolean(opts?.skipCamera);
+  if ("name" in origin && origin.name) useMapStore.getState().setOrigin(origin);
   useMapStore.getState().setDest(dest);
   if (!silent) {
     useMapStore.getState().setSearching(true);
@@ -382,9 +384,11 @@ export async function applyTrip(origin: StationHit | { lng: number; lat: number 
       void calibrateCorridor(final);
       return;
     }
-    store.setJourneys(final, 0);
     store.setSearching(false);
-    if (final[0]) lockJourneyTrain(final[0], { camera: !silent });
+    const upcoming = final.find((j) => departDue(j.departHhmm, nowMin) + Math.max(0, j.delayMin ?? 0) >= -1) ?? final[0];
+    const idx = Math.max(0, upcoming ? final.indexOf(upcoming) : 0);
+    store.setJourneys(final, idx);
+    if (upcoming) lockJourneyTrain(upcoming, { camera: !silent && !skipCamera, keepSheet: true });
     void calibrateCorridor(final);
   }
 }
@@ -954,10 +958,13 @@ export function fillPickedStation(hit: StationHit, field?: "from" | "to") {
   else s.setDest(chosen);
   s.selectStation(chosen);
   s.setPickField(null);
-  s.requestFlyTo({ lng: chosen.lng, lat: chosen.lat, zoom: 14.2, bearing: 0, pitch: 0.55, center: true });
   const after = useMapStore.getState();
-  if (after.originStation && after.destStation) void applyTrip(after.originStation, after.destStation, { skipCamera: true });
-  else void calibrateStation(chosen);
+  if (after.originStation && after.destStation) {
+    void applyTrip(after.originStation, after.destStation, { skipCamera: true });
+  } else {
+    s.requestFlyTo({ lng: chosen.lng, lat: chosen.lat, zoom: 14.2, bearing: 0, pitch: 0.55, center: true });
+    void calibrateStation(chosen);
+  }
   return true;
 }
 
@@ -1074,7 +1081,7 @@ export function SearchPanel() {
   };
 
   const runSearch = () => {
-    const dest = resolvePicked(index, toText, destStation, useMapStore.getState().selectedStation);
+    const dest = resolvePicked(index, toText, destStation, null);
     const originPick = resolvePicked(index, fromText, originStation, null);
     const origin = originPick ?? currentOrigin();
     if (!origin || !dest) return;

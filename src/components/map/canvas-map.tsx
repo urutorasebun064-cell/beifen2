@@ -37,6 +37,12 @@ import { PEAKS, FUJI_H, peakLabel, type Peak } from "@/data/peaks";
 import { useMapStore, simNow } from "@/store/map-store";
 import { patchSave } from "@/lib/save-sync";
 
+function ringIsHidden(s: ReturnType<typeof useMapStore.getState>) {
+  if (s.ringMode === "off") return true;
+  if (s.ringMode === "on") return false;
+  return Boolean((s.selectedTrain || s.journey || s.journeys.length || s.searching) && !s.konbiniWalk && !s.stayWalk && !s.mateWalk);
+}
+
 type Cam = { lng: number; lat: number; zoom: number; yaw: number; tilt: number };
 
 const OCEAN = "#000000";
@@ -3419,7 +3425,7 @@ export function CanvasMap() {
     ) => {
       const journey = useMapStore.getState().journey;
       const loose = Boolean(drag.current) || Boolean(camLerpRef.current);
-      const key = `${cam.lng.toFixed(loose ? 3 : 4)}|${cam.lat.toFixed(loose ? 3 : 4)}|${cam.zoom.toFixed(loose ? 2 : 3)}|${cam.yaw.toFixed(loose ? 2 : 3)}|${cam.tilt.toFixed(loose ? 2 : 3)}|${useMapStore.getState().pitchMode}|${w}|${h}|${journey?.dest.name ?? ""}|${lineRef.current.length}|${useMapStore.getState().selectedTrain?.id ?? ""}|${useMapStore.getState().selectedStation?.name ?? ""}|${useMapStore.getState().selectedStay?.id ?? ""}|${useMapStore.getState().stayLayer ? 1 : 0}|${useMapStore.getState().stayWalk ? 1 : 0}|${useMapStore.getState().selectedKonbini?.id ?? ""}|${useMapStore.getState().konbiniBrand ?? ""}|${useMapStore.getState().konbiniStores.length}|${useMapStore.getState().konbiniWalk ? 1 : 0}|${useMapStore.getState().selectedMate?.id ?? ""}|${useMapStore.getState().mateWalk ? 1 : 0}|${useMapStore.getState().lang}|${useMapStore.getState().radarEnabled ? 1 : 0}|${useMapStore.getState().mountainLayer ? 1 : 0}|${SLAB_FACES ? 1 : 0}`;
+      const key = `${cam.lng.toFixed(loose ? 3 : 4)}|${cam.lat.toFixed(loose ? 3 : 4)}|${cam.zoom.toFixed(loose ? 2 : 3)}|${cam.yaw.toFixed(loose ? 2 : 3)}|${cam.tilt.toFixed(loose ? 2 : 3)}|${useMapStore.getState().pitchMode}|${w}|${h}|${journey?.dest.name ?? ""}|${lineRef.current.length}|${useMapStore.getState().selectedTrain?.id ?? ""}|${useMapStore.getState().selectedStation?.name ?? ""}|${useMapStore.getState().selectedStay?.id ?? ""}|${useMapStore.getState().stayLayer ? 1 : 0}|${useMapStore.getState().stayWalk ? 1 : 0}|${useMapStore.getState().selectedKonbini?.id ?? ""}|${useMapStore.getState().konbiniBrand ?? ""}|${useMapStore.getState().konbiniStores.length}|${useMapStore.getState().konbiniWalk ? 1 : 0}|${useMapStore.getState().selectedMate?.id ?? ""}|${useMapStore.getState().mateWalk ? 1 : 0}|${useMapStore.getState().lang}|${useMapStore.getState().radarEnabled ? 1 : 0}|${useMapStore.getState().ringMode}|${useMapStore.getState().mountainLayer ? 1 : 0}|${SLAB_FACES ? 1 : 0}`;
       if (key === baseKey) return;
       baseKey = key;
       applyTransform(bg, sizeRef.current.dpr);
@@ -3817,7 +3823,7 @@ export function CanvasMap() {
         if (useMapStore.getState().ready && introDoneRef.current && !camLerpRef.current) {
           const loc = useMapStore.getState().userLocation;
           const s = useMapStore.getState();
-          const hideRing = Boolean(s.selectedTrain || s.journey || s.journeys.length || s.searching);
+          const hideRing = ringIsHidden(s);
           const ringM = s.konbiniBrand ? konbiniRingM(loc, s.stationIndex, s.nearestStations) : undefined;
           if (loc && !hideRing && camRef.current.zoom >= SHOW_ZOOM - 0.85) pullRoads(loc.lng, loc.lat, camRef.current.zoom, ringM);
         }
@@ -4248,9 +4254,7 @@ export function CanvasMap() {
             walk.lat += (user.lat - walk.lat) * k;
           }
           const st = useMapStore.getState();
-          const hideRing = Boolean(
-            (st.selectedTrain || st.journey || st.journeys.length || st.searching) && !st.konbiniWalk && !st.stayWalk && !st.mateWalk,
-          );
+          const hideRing = ringIsHidden(st);
           if (!hideRing) {
             const ringM = st.konbiniBrand ? konbiniRingM(user, st.stationIndex, st.nearestStations) : undefined;
             drawRoads(ctx, camRef.current, w, h, (lng, lat, alt) => project(lng, lat, camRef.current, w, h, alt), walk, ringM);
@@ -4648,6 +4652,18 @@ export function CanvasMap() {
           }
         }
         return;
+      }
+      {
+        const me = useMapStore.getState().userLocation;
+        const walk = walkRef.current;
+        if (me) {
+          const [ux, uy] = project(walk.set ? walk.lng : me.lng, walk.set ? walk.lat : me.lat, cam, w, h);
+          if (Number.isFinite(ux) && Math.hypot(ux - sx, uy - sy) < 42) {
+            const s = useMapStore.getState();
+            s.setRingMode(ringIsHidden(s) ? "on" : "off");
+            return;
+          }
+        }
       }
       for (const pin of useMapStore.getState().partyPins) {
         const [x, y] = project(pin.lng, pin.lat, cam, w, h);

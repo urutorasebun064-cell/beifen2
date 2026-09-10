@@ -135,6 +135,8 @@ type MapStore = {
   setRadarEnabled: (on: boolean) => void;
   radarHidden: number[];
   toggleRadarBand: (band: number) => void;
+  ringMode: "auto" | "on" | "off";
+  setRingMode: (mode: "auto" | "on" | "off") => void;
   mountainLayer: boolean;
   setMountainLayer: (on: boolean) => void;
   selectedPeak: Peak | null;
@@ -407,6 +409,8 @@ export const useMapStore = create<MapStore>((set, get) => ({
     set((s) => ({
       radarHidden: s.radarHidden.includes(band) ? s.radarHidden.filter((id) => id !== band) : [...s.radarHidden, band],
     })),
+  ringMode: "auto",
+  setRingMode: (ringMode) => set({ ringMode }),
   mountainLayer: false,
   setMountainLayer: (mountainLayer) =>
     set((s) => ({

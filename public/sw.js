@@ -1,5 +1,5 @@
 /* J PWA — never hijack navigations or scripts. Old interceptors caused a black screen. */
-const SW_VER = "j-v15";
+const SW_VER = "j-v19";
 const TILES = "jb-tiles-v1";
 const STATIC = "jb-static-v1";
 
@@ -75,20 +75,40 @@ self.addEventListener("push", (event) => {
   event.waitUntil(
     (async () => {
       const list = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
-      const visible = list.some((c) => c.visibilityState === "visible");
+      const focused = list.some((c) => c.focused);
       list.forEach((c) => c.postMessage({ type: "party-alert" }));
-      await self.registration.showNotification("J-Bmap", {
-        body: "•",
+      try {
+        if (self.navigator?.setAppBadge) await self.navigator.setAppBadge(1);
+      } catch {
+        /* */
+      }
+      if (focused) return;
+      let title = "J-Bmap";
+      let body = "•";
+      try {
+        const data = event.data ? event.data.json() : null;
+        if (data && typeof data === "object") {
+          if (typeof data.title === "string" && data.title) title = data.title;
+          if (typeof data.body === "string" && data.body) body = data.body;
+        }
+      } catch {
+        try {
+          const text = event.data ? event.data.text() : "";
+          if (text) body = "•";
+        } catch {
+          /* */
+        }
+      }
+      await self.registration.showNotification(title, {
+        body,
         tag: "jb-party",
         icon: "/icon-192.png",
         badge: "/icon-192.png",
-        silent: visible,
-        renotify: !visible,
+        silent: false,
+        renotify: true,
+        vibrate: [40, 40, 40],
+        data: { type: "party-alert" },
       });
-      if (visible) {
-        const notes = await self.registration.getNotifications({ tag: "jb-party" });
-        notes.forEach((n) => n.close());
-      }
     })(),
   );
 });

@@ -49,7 +49,7 @@ export async function registerPwa() {
       await Promise.all(regs.map((r) => r.unregister()));
       localStorage.setItem("jb-sw-v18", "1");
     }
-    await navigator.serviceWorker.register("/sw.js?v=18", { scope: "/", updateViaCache: "none" });
+    await navigator.serviceWorker.register("/sw.js?v=19", { scope: "/", updateViaCache: "none" });
   } catch {
     /* ignore */
   }

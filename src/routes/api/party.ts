@@ -111,7 +111,10 @@ async function ensureVapid() {
 async function pingPush(room: Room, exceptId: string) {
   const keys = await ensureVapid();
   if (!keys?.publicKey || !keys.privateKey) return;
-  let wp: { setVapidDetails: (a: string, b: string, c: string) => void; sendNotification: (sub: unknown, payload: string) => Promise<unknown> } | null = null;
+  let wp: {
+    setVapidDetails: (a: string, b: string, c: string) => void;
+    sendNotification: (sub: unknown, payload: string, opts?: { TTL?: number; urgency?: string }) => Promise<unknown>;
+  } | null = null;
   try {
     const mod = await import("web-push");
     wp = (mod as { default?: typeof wp }).default ?? (mod as typeof wp);
@@ -124,12 +127,16 @@ async function pingPush(room: Room, exceptId: string) {
   } catch {
     return;
   }
-  const payload = JSON.stringify({ title: "J-Bmap", body: "•", tag: "jb-party", silent: false });
+  const payload = JSON.stringify({ title: "J-Bmap", body: "•", tag: "jb-party" });
   const jobs = room.members
     .filter((m) => m.id !== exceptId && m.push?.endpoint && m.push.p256dh && m.push.auth)
     .map((m) =>
       wp
-        .sendNotification({ endpoint: m.push!.endpoint, keys: { p256dh: m.push!.p256dh, auth: m.push!.auth } }, payload)
+        .sendNotification(
+          { endpoint: m.push!.endpoint, keys: { p256dh: m.push!.p256dh, auth: m.push!.auth } },
+          payload,
+          { TTL: 120, urgency: "high" },
+        )
         .catch((err: { statusCode?: number }) => {
           const code = Number(err?.statusCode);
           if (code === 404 || code === 410) m.push = undefined;

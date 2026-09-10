@@ -299,7 +299,7 @@ export function AppShell() {
         <div
           className={`pointer-events-auto mx-auto flex w-full max-w-md flex-col overflow-hidden rounded-[var(--radius-xl)] bg-surface/94 shadow-[var(--shadow-border)] backdrop-blur-md ${
             sheetOpen
-              ? "max-h-[min(24rem,calc(100svh-24rem-env(safe-area-inset-top)-env(safe-area-inset-bottom)))] gap-3 p-3"
+              ? "h-[calc(100svh-22.25rem-env(safe-area-inset-top))] max-h-[calc(100svh-22.25rem-env(safe-area-inset-top))] gap-3 p-3"
               : "p-2"
           }`}
         >

@@ -11,6 +11,7 @@ import { QuakePanel } from "@/components/app/quake-panel";
 import { WeatherChip } from "@/components/app/weather-chip";
 import { InstallChip } from "@/components/app/install-app";
 import { DetailPanel, FollowCard } from "@/components/app/timetable-panel";
+import { lockJourneyTrain } from "@/components/app/route-panel";
 import { Button } from "@/components/ui/button";
 import { copies } from "@/lib/i18n";
 import { isNightService } from "@/lib/rail/simulate";
@@ -33,12 +34,14 @@ export function AppShell() {
   const originStation = useMapStore((s) => s.originStation);
   const destStation = useMapStore((s) => s.destStation);
   const journeys = useMapStore((s) => s.journeys);
+  const journey = useMapStore((s) => s.journey);
   const selectedStay = useMapStore((s) => s.selectedStay);
   const selectedKonbini = useMapStore((s) => s.selectedKonbini);
   const selectedPeak = useMapStore((s) => s.selectedPeak);
   const selectedTrain = useMapStore((s) => s.selectedTrain);
   const odptKey = useMapStore((s) => s.odptKey);
   const night = isNightService(tokyoParts(simNow()).minutes);
+  const onRide = Boolean((selectedTrain || journey) && !sheetOpen && !selectedStay && !selectedKonbini);
 
   useEffect(() => {
     const html = document.documentElement;
@@ -110,16 +113,19 @@ export function AppShell() {
     const stepBack = () => {
       const s = useMapStore.getState();
       if (s.sheetOpen) {
-        s.setSheetOpen(false);
+        if (s.journey) lockJourneyTrain(s.journey, { keepSheet: false, camera: false });
+        else s.setSheetOpen(false);
+        return;
+      }
+      if (s.journey || s.destStation || s.journeys.length) {
+        s.dismissPick();
+        s.clearTrip();
+        s.setOrigin(null);
         return;
       }
       if (s.selectedTrain || s.followTrainId) {
         s.selectTrain(null);
         s.setFollowTrainId(null);
-        return;
-      }
-      if (s.journey || s.destStation || s.journeys.length) {
-        s.clearTrip();
         return;
       }
       if (s.pickField) {
@@ -289,10 +295,10 @@ export function AppShell() {
           <KonbiniChat />
         </>
       ) : (
-      <aside className={`pointer-events-none absolute inset-x-0 bottom-0 z-10 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] md:inset-y-0 md:top-0 md:right-auto md:w-[360px] md:p-4 md:pt-24 ${selectedTrain ? "max-md:hidden" : ""}`}>
+      <aside className={`pointer-events-none absolute inset-x-0 bottom-0 z-30 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] ${onRide ? "hidden" : ""}`}>
         <div
-          className={`pointer-events-auto flex flex-col overflow-hidden rounded-[var(--radius-xl)] bg-surface/94 shadow-[var(--shadow-border)] backdrop-blur-md ${
-            sheetOpen ? "max-h-[56vh] gap-3 p-3 md:max-h-[calc(100dvh-7.5rem)] md:p-4" : "p-2 md:p-3"
+          className={`pointer-events-auto mx-auto flex w-full max-w-md max-h-[calc(100svh-19.5rem-env(safe-area-inset-top))] flex-col overflow-hidden rounded-[var(--radius-xl)] bg-surface/94 shadow-[var(--shadow-border)] backdrop-blur-md ${
+            sheetOpen ? "gap-3 p-3" : "p-2"
           }`}
         >
           <div className="relative flex w-full items-center justify-center py-1">
@@ -300,7 +306,14 @@ export function AppShell() {
               type="button"
               className="flex items-center justify-center py-1 text-fg-muted"
               aria-label={sheetOpen ? t.panelClose : t.panelOpen}
-              onClick={() => useMapStore.getState().setSheetOpen(!sheetOpen)}
+              onClick={() => {
+                const s = useMapStore.getState();
+                if (s.sheetOpen && s.journey) {
+                  lockJourneyTrain(s.journey, { keepSheet: false, camera: false });
+                  return;
+                }
+                s.setSheetOpen(!s.sheetOpen);
+              }}
             >
               {sheetOpen ? <ChevronDown className="size-5" /> : <ChevronUp className="size-5" />}
             </button>
@@ -310,6 +323,10 @@ export function AppShell() {
               aria-label={t.close}
               onClick={() => {
                 const s = useMapStore.getState();
+                if (s.journey) {
+                  lockJourneyTrain(s.journey, { keepSheet: false, camera: false });
+                  return;
+                }
                 s.setOrigin(null);
                 s.setDest(null);
                 s.setJourney(null);
@@ -352,7 +369,7 @@ export function AppShell() {
       </aside>
       )}
 
-      {selectedTrain && !selectedStay && !selectedKonbini ? (
+      {onRide ? (
         <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
           <div className="pointer-events-auto mx-auto w-full max-w-md">
             <FollowCard />

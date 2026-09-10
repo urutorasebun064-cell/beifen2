@@ -1,4 +1,3 @@
-import { ArrowRight, Footprints, TrainFront, X } from "lucide-react";
 import { copies, displayName, type Copy, type Lang } from "@/lib/i18n";
 import { journeyDelaySeconds, journeyShowsDelay, stampJourneyDelay } from "@/lib/rail/delay";
 import { haversine, tokyoParts, arriveHhmmOf } from "@/lib/rail/geo";
@@ -7,7 +6,6 @@ import { ensureConnections } from "@/lib/rail/route";
 import { placeTrainOnLeg, rideWaiting } from "@/lib/rail/timetable-snap";
 import { sliceRailPath } from "@/lib/rail/graph";
 import type { Journey, RouteLeg, Train } from "@/lib/rail/types";
-import { Button } from "@/components/ui/button";
 import { useMapStore, simNow } from "@/store/map-store";
 
 function findLine(leg: Pick<RouteLeg, "lineName" | "to"> & Partial<Pick<RouteLeg, "lineId" | "from">>) {
@@ -467,76 +465,13 @@ export function RoutePanel({ journey }: { journey: Journey }) {
   const journeys = useMapStore((s) => s.journeys);
   const journeyIndex = useMapStore((s) => s.journeyIndex);
   const liveTrains = useMapStore((s) => s.liveTrains);
-  const view = stampJourneyDelay(journey, liveTrains);
   const nowMin = tokyoParts(simNow()).minutes;
   const upcoming = (journeys.length ? journeys : [journey]).filter((j) => untilHhmm(j.departHhmm, nowMin, 0) >= 0);
   const list = upcoming.length ? upcoming : journeys.length ? journeys : [journey];
 
   return (
-    <section className="flex flex-col gap-3">
-      <div className="flex items-start justify-between gap-2">
-        <button type="button" className="min-w-0 text-left" onClick={() => lockJourneyTrain(journey, { keepSheet: false })}>
-          <p className="text-xs font-medium tracking-wide text-fg-muted uppercase">
-            {journey.source && journey.source !== "local" ? t.googleRoute : t.route}
-          </p>
-          <h2 className="mt-0.5 truncate text-base font-medium tracking-tight text-fg">
-            {displayName(journey.origin.name, lang) || t.youAreHere}
-            <span className="mx-1.5 text-fg-subtle">→</span>
-            {displayName(journey.dest.name, lang)}
-          </h2>
-          <p className="mt-1 text-sm tabular-nums text-fg">
-            <span className={untilHhmm(journey.departHhmm, nowMin, journey.delayMin ?? 0) >= 0 && list.slice(0, 2).some((j) => j.departHhmm === journey.departHhmm) ? "time-blink font-semibold" : ""}>
-              {journey.departHhmm}
-            </span>
-            <span className="mx-1 text-fg-subtle">{t.departAt}</span>
-            <span className="mx-1">→</span>
-            {journey.arriveHhmm}
-            <span className="mx-1 text-fg-subtle">{t.arriveAt}</span>
-            <span className="ml-2">
-              {t.about}
-              {journey.totalMinutes}
-              {t.min}
-            </span>
-            {journey.transfers > 0 ? (
-              <span className="ml-2 text-fg-muted">
-                {journey.transfers}
-                {t.transfers}
-              </span>
-            ) : null}
-            {journey.walkFromGpsMin ? (
-              <span className="ml-2 text-fg-muted">
-                {t.walkAbout}
-                {Math.round(journey.walkFromGpsMin)}
-                {t.min}
-              </span>
-            ) : null}
-            {journey.walkToDestMin ? (
-              <span className="ml-2 text-fg-muted">
-                {t.walkAfter}
-                {t.about}
-                {Math.round(journey.walkToDestMin)}
-                {t.min}
-              </span>
-            ) : null}
-          </p>
-          {journeyShowsDelay(view) ? (
-            <p className="mt-1 text-sm font-medium text-[#e4453a]">
-              {t.delay}
-              {journeyDelaySeconds(view) > 0 ? ` ${journeyDelaySeconds(view)}${t.sec}` : ""}
-            </p>
-          ) : null}
-        </button>
-        <Button
-          variant="ghost"
-          size="iconSm"
-          aria-label={t.close}
-          onClick={() => useMapStore.getState().clearTrip()}
-        >
-          <X />
-        </Button>
-      </div>
-
-      <ul className="flex max-h-64 flex-col gap-1 overflow-y-auto">
+    <section>
+      <ul className="flex flex-col gap-1">
         {list.map((j, i) => {
           const shown = stampJourneyDelay(j, liveTrains);
           const active = journeys.length > 1 ? journeys.indexOf(j) === journeyIndex : true;
@@ -578,92 +513,6 @@ export function RoutePanel({ journey }: { journey: Journey }) {
           );
         })}
       </ul>
-
-      <ol className="flex flex-col gap-2">
-        {journey.legs.map((leg, i) => {
-          const prev = journey.legs[i - 1];
-          const xfer = i > 0 && leg.kind === "ride" && (prev?.kind === "ride" || (prev?.kind === "walk" && journey.legs[i - 2]?.kind === "ride"));
-          const xferMin = prev?.kind === "walk" && journey.legs[i - 2]?.kind === "ride" ? prev.minutes : 0;
-          return (
-          <li key={`${leg.kind}-${leg.from.name}-${leg.to.name}-${i}`}>
-            {xfer ? (
-              <p className="mb-1.5 px-1 text-xs text-fg-muted">
-                {t.transfer}
-                {xferMin ? ` ${walkBit(xferMin, t)}` : ""}
-              </p>
-            ) : null}
-            <LegCard leg={leg} t={t} />
-          </li>
-          );
-        })}
-      </ol>
     </section>
-  );
-}
-
-function LegCard({
-  leg,
-  t,
-}: {
-  leg: RouteLeg;
-  t: Copy;
-}) {
-  const lang = useMapStore.getState().lang;
-  const stopCount = Math.max(0, leg.stops.length - 1);
-  return (
-    <div className="rounded-[var(--radius-md)] bg-bg-subtle p-2.5">
-      <button type="button" className="w-full text-left" onClick={() => lockRide(leg)}>
-        <div className="flex items-center gap-2">
-          {leg.kind === "walk" ? (
-            <Footprints className="size-4 text-fg-muted" />
-          ) : (
-            <span className="h-3 w-1.5 rounded-full" style={{ background: leg.color }} />
-          )}
-          <p className="min-w-0 text-sm leading-snug font-medium text-fg">
-            {leg.kind === "walk" ? t.walk : rideHeadline(leg, t, lang)}
-          </p>
-          <span className="ml-auto shrink-0 text-xs tabular-nums text-fg-muted">
-            {Math.round(leg.minutes)}
-            {t.min}
-          </span>
-        </div>
-        <p className="mt-1.5 flex items-center gap-1.5 text-sm text-fg">
-          <span className="truncate">{leg.from.name || t.youAreHere}</span>
-          <ArrowRight className="size-3.5 shrink-0 text-fg-subtle" />
-          <span className="truncate">{leg.to.name}</span>
-        </p>
-        {leg.kind === "ride" ? (
-          <p className="mt-1 text-xs leading-relaxed text-fg-muted">
-            {leg.departHhmm ? `${leg.departHhmm}${t.departAt} ` : ""}
-            {t.board}
-            {leg.toward ? ` ${displayName(leg.toward, lang)}${lang === "zh" ? "行" : lang === "en" ? "" : "行き"}` : ""}
-            <span className="mx-1.5 text-fg-subtle">·</span>
-            {stopCount}
-            {t.stopsCount}
-            {leg.arriveHhmm ? (
-              <>
-                <span className="mx-1.5 text-fg-subtle">·</span>
-                {leg.arriveHhmm}
-                {t.getOff}
-                {displayName(leg.to.name, lang)}
-              </>
-            ) : null}
-          </p>
-        ) : (
-          <p className="mt-1 text-xs text-fg-muted">
-            {t.walkAbout}
-            {Math.round(leg.minutes)}
-            {t.min}
-            {leg.departHhmm ? ` · ${leg.departHhmm}` : ""}
-          </p>
-        )}
-      </button>
-      {leg.kind === "ride" ? (
-        <Button variant="quiet" size="sm" className="mt-2 w-full" onClick={() => lockRide(leg)}>
-          <TrainFront />
-          {t.watch}
-        </Button>
-      ) : null}
-    </div>
   );
 }

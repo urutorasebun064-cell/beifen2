@@ -1,5 +1,3 @@
-import { ChevronDown } from "lucide-react";
-import { useState } from "react";
 import { copies, displayName, type Copy, type Lang } from "@/lib/i18n";
 import { journeyDelaySeconds, journeyShowsDelay, stampJourneyDelay } from "@/lib/rail/delay";
 import { haversine, tokyoParts, arriveHhmmOf } from "@/lib/rail/geo";
@@ -470,75 +468,51 @@ export function RoutePanel({ journey }: { journey: Journey }) {
   const nowMin = tokyoParts(simNow()).minutes;
   const upcoming = (journeys.length ? journeys : [journey]).filter((j) => untilHhmm(j.departHhmm, nowMin, 0) >= 0);
   const list = upcoming.length ? upcoming : journeys.length ? journeys : [journey];
-  const head = list.slice(0, 5);
-  const rest = list.slice(5);
-  const [openMore, setOpenMore] = useState(false);
-
-  const row = (j: Journey, i: number) => {
-    const shown = stampJourneyDelay(j, liveTrains);
-    const active = journeys.length > 1 ? journeys.indexOf(j) === journeyIndex : true;
-    const soon = i < 2;
-    return (
-      <li key={`${j.departHhmm}-${j.arriveHhmm}-${i}`}>
-        <button
-          type="button"
-          className={`flex w-full items-center justify-between gap-2 rounded-[var(--radius-sm)] px-2 py-2 text-left ${active ? "bg-fg/10" : "hover:bg-fg/6"}`}
-          onClick={() => {
-            const idx = journeys.indexOf(j);
-            if (idx >= 0) useMapStore.getState().setJourneys(journeys, idx);
-            lockJourneyTrain(j, { keepSheet: false });
-          }}
-        >
-          <span className="min-w-0">
-            <span className={`block text-sm tabular-nums ${soon ? "time-blink font-semibold" : "text-fg"}`}>
-              {j.departHhmm}
-              <span className="mx-1 text-fg-subtle">→</span>
-              {j.arriveHhmm}
-            </span>
-            <span className="block text-xs leading-relaxed text-fg-muted">
-              {transferLine(j, t)}
-              {j.walkToDestMin ? ` · ${t.walkAfter}${t.about}${Math.round(j.walkToDestMin)}${t.min}` : ""}
-            </span>
-            {journeyShowsDelay(shown) ? (
-              <span className="mt-1 block text-xs font-medium text-[#e4453a]">
-                {t.delay}
-                {journeyDelaySeconds(shown) > 0 ? ` ${journeyDelaySeconds(shown)}${t.sec}` : ""}
-              </span>
-            ) : null}
-          </span>
-          <span className="shrink-0 text-right text-sm tabular-nums text-fg">
-            {j.totalMinutes}
-            {t.min}
-          </span>
-        </button>
-      </li>
-    );
-  };
 
   return (
     <section>
-      <ul className="flex flex-col gap-0.5">{head.map((j, i) => row(j, i))}</ul>
-      {rest.length ? (
-        <div className="mt-1">
-          <button
-            type="button"
-            className="flex w-full items-center justify-between rounded-[var(--radius-sm)] px-2 py-1.5 text-left text-xs text-fg-muted hover:bg-fg/6"
-            onClick={() => setOpenMore((v) => !v)}
-            aria-expanded={openMore}
-          >
-            <span>
-              {t.moreRoutes}
-              <span className="ml-1 tabular-nums text-fg-subtle">{rest.length}</span>
-            </span>
-            <ChevronDown className={`size-3.5 shrink-0 transition-transform ${openMore ? "rotate-180" : ""}`} />
-          </button>
-          {openMore ? (
-            <ul className="mt-0.5 max-h-44 overflow-y-auto overscroll-contain rounded-[var(--radius-sm)] bg-fg/4">
-              {rest.map((j, i) => row(j, i + 5))}
-            </ul>
-          ) : null}
-        </div>
-      ) : null}
+      <ul className="max-h-[11.25rem] overflow-y-auto overscroll-contain">
+        {list.map((j, i) => {
+          const shown = stampJourneyDelay(j, liveTrains);
+          const active = journeys.length > 1 ? journeys.indexOf(j) === journeyIndex : true;
+          const soon = i < 2;
+          return (
+            <li key={`${j.departHhmm}-${j.arriveHhmm}-${i}`}>
+              <button
+                type="button"
+                className={`flex h-9 w-full items-center justify-between gap-2 rounded-[var(--radius-sm)] px-2 text-left ${active ? "bg-fg/10" : "hover:bg-fg/6"}`}
+                onClick={() => {
+                  const idx = journeys.indexOf(j);
+                  if (idx >= 0) useMapStore.getState().setJourneys(journeys, idx);
+                  lockJourneyTrain(j, { keepSheet: false });
+                }}
+              >
+                <span className="min-w-0 truncate">
+                  <span className={`text-sm tabular-nums ${soon ? "time-blink font-semibold" : "text-fg"}`}>
+                    {j.departHhmm}
+                    <span className="mx-1 text-fg-subtle">→</span>
+                    {j.arriveHhmm}
+                  </span>
+                  <span className="ml-2 text-xs text-fg-muted">
+                    {transferLine(j, t)}
+                    {j.walkToDestMin ? ` · ${t.walkAfter}${t.about}${Math.round(j.walkToDestMin)}${t.min}` : ""}
+                  </span>
+                  {journeyShowsDelay(shown) ? (
+                    <span className="ml-1 text-xs font-medium text-[#e4453a]">
+                      {t.delay}
+                      {journeyDelaySeconds(shown) > 0 ? `${journeyDelaySeconds(shown)}${t.sec}` : ""}
+                    </span>
+                  ) : null}
+                </span>
+                <span className="shrink-0 text-sm tabular-nums text-fg">
+                  {j.totalMinutes}
+                  {t.min}
+                </span>
+              </button>
+            </li>
+          );
+        })}
+      </ul>
     </section>
   );
 }

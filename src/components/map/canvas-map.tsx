@@ -1426,9 +1426,9 @@ function remainingJourneySegs(lines: LineRuntime[]) {
       }
       const routed = densifyRailPath(from, to, lines, index, hinted);
       line = routed.line;
-      pts = routed.path.length >= 3 ? routed.path : [];
-      if (pts.length < 3 && leg.path && leg.path.length >= 3) pts = leg.path.slice();
-      if (pts.length < 3) {
+      pts = routed.path.length >= 2 ? routed.path : [];
+      if (pts.length < 2 && leg.path && leg.path.length >= 2) pts = leg.path.slice();
+      if (pts.length < 2) {
         const prefer = preferLineName(leg.lineName ?? "");
         const aim = realStopOf(lines, leg.to.name) ?? to;
         const origin = realStopOf(lines, leg.from.name) ?? from;
@@ -1436,9 +1436,9 @@ function remainingJourneySegs(lines: LineRuntime[]) {
         if (line) {
           const sliced = sliceRailPath(line, { ...from, name: leg.from.name }, { ...to, name: leg.to.name });
           const next = sliced.length >= 2 ? sliced : glowOnLine(line, leg.from.name, leg.to.name, aim.lng, aim.lat);
-          if (next.length >= 3) pts = next;
+          if (next.length >= 2) pts = next;
         }
-        if (pts.length < 3) {
+        if (pts.length < 2) {
           const named = (prefer ? lines.filter((l) => linePrefers(l, prefer)) : []).concat(
             lines.filter((l) => stopIdx(l, leg.from.name) >= 0 || stopIdx(l, leg.to.name) >= 0),
           );
@@ -1447,8 +1447,8 @@ function remainingJourneySegs(lines: LineRuntime[]) {
             if (seen.has(cand.id)) continue;
             seen.add(cand.id);
             let next = glowOnLine(cand, leg.from.name, leg.to.name, aim.lng, aim.lat);
-            if (next.length < 3) next = glowOnLine(cand, leg.to.name, leg.from.name, origin.lng, origin.lat).slice().reverse();
-            if (next.length >= 3) {
+            if (next.length < 2) next = glowOnLine(cand, leg.to.name, leg.from.name, origin.lng, origin.lat).slice().reverse();
+            if (next.length >= 2) {
               pts = next;
               line = cand;
               break;

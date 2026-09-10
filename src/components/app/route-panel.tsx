@@ -475,7 +475,7 @@ export function RoutePanel({ journey }: { journey: Journey }) {
   return (
     <section className="flex flex-col gap-3">
       <div className="flex items-start justify-between gap-2">
-        <button type="button" className="min-w-0 text-left" onClick={() => lockJourneyTrain(journey)}>
+        <button type="button" className="min-w-0 text-left" onClick={() => lockJourneyTrain(journey, { keepSheet: false })}>
           <p className="text-xs font-medium tracking-wide text-fg-muted uppercase">
             {journey.source && journey.source !== "local" ? t.googleRoute : t.route}
           </p>
@@ -549,7 +549,7 @@ export function RoutePanel({ journey }: { journey: Journey }) {
                 onClick={() => {
                   const idx = journeys.indexOf(j);
                   if (idx >= 0) useMapStore.getState().setJourneys(journeys, idx);
-                  lockJourneyTrain(j);
+                  lockJourneyTrain(j, { keepSheet: false });
                 }}
               >
                 <span className="min-w-0">

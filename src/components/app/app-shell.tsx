@@ -354,9 +354,9 @@ export function AppShell() {
       </aside>
       )}
 
-      {selectedTrain && !selectedStay && !selectedKonbini && !journeys.length ? (
+      {(selectedTrain || Boolean(journeys.length)) && !selectedStay && !selectedKonbini && !sheetOpen ? (
         <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
-          <div className="pointer-events-auto mx-auto w-full max-w-md">
+          <div className={`pointer-events-auto mx-auto w-full max-w-md ${journeys.length ? "mb-14" : ""}`}>
             <FollowCard />
           </div>
         </div>

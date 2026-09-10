@@ -418,8 +418,8 @@ export async function applyTrip(origin: StationHit | { lng: number; lat: number 
     const upcoming = final.find((j) => departDue(j.departHhmm, nowMin) + Math.max(0, j.delayMin ?? 0) >= -1) ?? final[0];
     const idx = Math.max(0, upcoming ? final.indexOf(upcoming) : 0);
     store.setJourneys(final, idx);
-    if (upcoming) lockJourneyTrain(upcoming, { camera: !silent && !skipCamera, keepSheet: true });
-    store.setSheetOpen(true);
+    if (upcoming) lockJourneyTrain(upcoming, { camera: !silent && !skipCamera, keepSheet: false });
+    store.setSheetOpen(false);
     void calibrateCorridor(final);
   }
 }

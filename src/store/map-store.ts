@@ -175,7 +175,7 @@ export const useMapStore = create<MapStore>((set, get) => ({
       ready: true,
       loadError: null,
       nearestStations: s.userLocation
-        ? nearestStationsFrom(stationIndex, s.userLocation.lng, s.userLocation.lat, 2, 1e9)
+        ? nearestStationsFrom(stationIndex, s.userLocation.lng, s.userLocation.lat, 1, 1e9)
         : [],
     })),
   setLoadError: (loadError) => set({ loadError }),
@@ -186,7 +186,7 @@ export const useMapStore = create<MapStore>((set, get) => ({
       userLocation,
       locateStatus,
       nearestStations: userLocation
-        ? nearestStationsFrom(s.stationIndex, userLocation.lng, userLocation.lat, 2, 1e9)
+        ? nearestStationsFrom(s.stationIndex, userLocation.lng, userLocation.lat, 1, 1e9)
         : [],
     })),
   headingDeg: null,

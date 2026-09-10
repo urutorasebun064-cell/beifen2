@@ -251,7 +251,8 @@ function featureToJourney(feat: YahooFeature, origin: RouteStop, dest: RouteStop
     }
     if (prev && prev.kind === "ride" && leg.kind === "ride") {
       const gap = clockSpan(prev.arriveHhmm, leg.departHhmm);
-      if (gap > 0) {
+      const sameStop = (prev.to.name || "").replace(/駅$/u, "") === (leg.from.name || "").replace(/駅$/u, "");
+      if (gap > 0 && !sameStop) {
         legs.push({
           kind: "walk",
           from: prev.to,
@@ -310,11 +311,12 @@ function featureToJourney(feat: YahooFeature, origin: RouteStop, dest: RouteStop
   const xferRaw = Number(summary.transferCount);
   const transfers = Number.isFinite(xferRaw) ? Math.max(0, xferRaw) : Math.max(0, legs.filter((l) => l.kind === "ride").length - 1);
   const delay = delayFromFeat(feat);
+  const span = clockSpan(summary.departureTime, summary.arrivalTime);
   return {
     origin,
     dest,
     legs,
-    totalMinutes: parseMinutes(summary.totalTime),
+    totalMinutes: span || parseMinutes(summary.totalTime),
     transfers,
     departHhmm: summary.departureTime,
     arriveHhmm: summary.arrivalTime ?? dest.name,

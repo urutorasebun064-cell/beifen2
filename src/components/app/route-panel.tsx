@@ -505,7 +505,12 @@ export function RoutePanel({ journey }: { journey: Journey }) {
                   ) : null}
                 </span>
                 <span className="shrink-0 text-sm tabular-nums text-fg">
-                  {j.totalMinutes}
+                  {(() => {
+                    const span = hhmmToMin(j.departHhmm) != null && hhmmToMin(j.arriveHhmm) != null
+                      ? ((hhmmToMin(j.arriveHhmm)! - hhmmToMin(j.departHhmm)! + 1440) % 1440)
+                      : 0;
+                    return span || j.totalMinutes;
+                  })()}
                   {t.min}
                 </span>
               </button>

@@ -24,7 +24,7 @@ import {
 import type { Journey, LineRuntime, RouteLeg, StationHit, Train } from "@/lib/rail/types";
 import { Button } from "@/components/ui/button";
 import { applyMateTrip, calibrateTrain, calibrateStation, fillPickedStation, locateUser, noteStreetZoom } from "@/components/app/search-panel";
-import { findLineForLeg, locateStation, sliceRailPath } from "@/lib/rail/graph";
+import { findLineForLeg, locateStation, pathForRide, sliceRailPath } from "@/lib/rail/graph";
 import { placeTrainOnLeg, stopIndexByName } from "@/lib/rail/timetable-snap";
 import { arrivalCompare, journeyGuide, rideHeadline } from "@/components/app/route-panel";
 import { focusStay } from "@/components/app/stay-catalog";
@@ -1384,12 +1384,13 @@ function remainingJourneySegs(lines: LineRuntime[]) {
       const from =
         shopTrip && Number.isFinite(leg.from.lng) ? leg.from : locateStation(leg.from.name, lines, index, leg.from);
       const to = shopTrip && Number.isFinite(leg.to.lng) ? leg.to : locateStation(leg.to.name, lines, index, leg.to);
-      const start = here && haversine([here.lng, here.lat], [to.lng, to.lat]) < haversine([from.lng, from.lat], [to.lng, to.lat]) + 0.02
-        ? here
-        : from;
-      const hop = haversine([start.lng, start.lat], [to.lng, to.lat]);
       const shop = shopTrip && i === journey.legs.length - 1;
-      if (shop && store.stayWalk) continue;
+      const start = shop
+        ? from
+        : here && haversine([here.lng, here.lat], [to.lng, to.lat]) < haversine([from.lng, from.lat], [to.lng, to.lat]) + 0.02
+          ? here
+          : from;
+      const hop = haversine([start.lng, start.lat], [to.lng, to.lat]);
       if (!shop && hop > 1.8) continue;
       if (hop < 0.05) continue;
       const pts: [number, number][] = [
@@ -1424,10 +1425,16 @@ function remainingJourneySegs(lines: LineRuntime[]) {
       if (pts.length < 2 && leg.path && leg.path.length >= 3) pts = leg.path.slice();
       if (pts.length < 2) {
         line = pickRideLine(lines, index, hinted, { ...from, name: leg.from.name }, { ...to, name: leg.to.name }) ?? line;
-        if (line && stopIdx(line, from.name) >= 0 && stopIdx(line, to.name) >= 0) {
-          pts = rideGlowPath(line, from.name, to.name);
+        if (line) pts = rideGlowPath(line, from.name, to.name);
+      }
+      if (pts.length < 2 || (hop > 2.4 && pts.length < 3)) {
+        const routed = pathForRide(from, to, lines, index, hinted);
+        if (routed.path.length >= 3 || (routed.path.length >= 2 && hop <= 2.4)) {
+          pts = routed.path;
+          if (routed.line) line = routed.line;
         }
       }
+      if (pts.length < 2 && line) pts = glowOnLine(line, from.name, to.name, to.lng, to.lat);
       if (pts.length >= 2 && hop > 2.4 && pts.length < 3) pts = [];
       if (pts.length < 2) {
         const a = airportOf(leg.from.name);
@@ -4368,7 +4375,36 @@ export function CanvasMap() {
             }
           }
           if (staySel) {
-            const shopNear = stationsNearPlace(st.stationIndex, staySel.lng, staySel.lat, 2);
+            const shopNear = stationsNearPlace(st.stationIndex, staySel.lng, staySel.lat, 1);
+            for (const row of shopNear) {
+              const sta = row.station;
+              const [nx, ny] = project(sta.lng, sta.lat, camRef.current, w, h);
+              if (!Number.isFinite(nx) || !Number.isFinite(ny)) continue;
+              const pulse = 0.55 + 0.45 * (0.5 + 0.5 * Math.sin(ts / 320));
+              ctx.strokeStyle = `rgba(255, 214, 110, ${0.35 + 0.4 * pulse})`;
+              ctx.lineWidth = 2.2;
+              ctx.beginPath();
+              ctx.arc(nx, ny, 11 + 8 * pulse, 0, Math.PI * 2);
+              ctx.stroke();
+              ctx.fillStyle = "#ffe08a";
+              ctx.beginPath();
+              ctx.arc(nx, ny, 3.4, 0, Math.PI * 2);
+              ctx.fill();
+              const tip = `${displayName(sta.name, lang)} · ${formatKm(row.km)}`;
+              ctx.font = mapFont(11, 700);
+              ctx.textAlign = "center";
+              ctx.textBaseline = "bottom";
+              const tw = ctx.measureText(tip).width;
+              ctx.fillStyle = "rgba(28, 22, 8, 0.9)";
+              ctx.beginPath();
+              roundRectPath(ctx, nx - tw / 2 - 6, ny - 28, tw + 12, 16, 6);
+              ctx.fill();
+              ctx.fillStyle = "#ffe08a";
+              ctx.fillText(tip, nx, ny - 14);
+            }
+          }
+          if (konbiniSel) {
+            const shopNear = stationsNearPlace(st.stationIndex, konbiniSel.lng, konbiniSel.lat, 1);
             for (const row of shopNear) {
               const sta = row.station;
               const [nx, ny] = project(sta.lng, sta.lat, camRef.current, w, h);
@@ -4451,18 +4487,25 @@ export function CanvasMap() {
             ctx.fill();
           }
           const shop = st.konbiniWalk ? st.selectedKonbini : null;
-          if (shop && Number.isFinite(x) && Number.isFinite(y)) {
+          if (shop) {
+            const near = stationsNearPlace(st.stationIndex, shop.lng, shop.lat, 1)[0];
             const [sx, sy] = project(shop.lng, shop.lat, camRef.current, w, h);
-            if (Number.isFinite(sx) && Number.isFinite(sy)) {
-              drawWalkGuide(ctx, x, y, sx, sy, KONBINI_META[shop.brand].color, metersTo(shop, user));
+            if (near && Number.isFinite(sx) && Number.isFinite(sy)) {
+              const [nx, ny] = project(near.station.lng, near.station.lat, camRef.current, w, h);
+              if (Number.isFinite(nx) && Number.isFinite(ny)) {
+                drawWalkGuide(ctx, nx, ny, sx, sy, KONBINI_META[shop.brand].color, near.km * 1000);
+              }
             }
           }
           const stayWalkTo = st.stayWalk ? st.selectedStay : null;
-          if (stayWalkTo && Number.isFinite(x) && Number.isFinite(y)) {
+          if (stayWalkTo && !st.journey?.walkToDestMin) {
+            const near = stationsNearPlace(st.stationIndex, stayWalkTo.lng, stayWalkTo.lat, 1)[0];
             const [sx, sy] = project(stayWalkTo.lng, stayWalkTo.lat, camRef.current, w, h);
-            if (Number.isFinite(sx) && Number.isFinite(sy)) {
-              const m = haversine([user.lng, user.lat], [stayWalkTo.lng, stayWalkTo.lat]) * 1000;
-              drawWalkGuide(ctx, x, y, sx, sy, "#ffe08a", m);
+            if (near && Number.isFinite(sx) && Number.isFinite(sy)) {
+              const [nx, ny] = project(near.station.lng, near.station.lat, camRef.current, w, h);
+              if (Number.isFinite(nx) && Number.isFinite(ny)) {
+                drawWalkGuide(ctx, nx, ny, sx, sy, "#ffe08a", near.km * 1000);
+              }
             }
           }
           const mateWalkTo = st.mateWalk ? st.selectedMate : null;
@@ -4718,7 +4761,7 @@ export function CanvasMap() {
       if (useMapStore.getState().selectedStay) {
         const stay = useMapStore.getState().selectedStay;
         const shopNear = stay
-          ? stationsNearPlace(useMapStore.getState().stationIndex, stay.lng, stay.lat, 2)
+          ? stationsNearPlace(useMapStore.getState().stationIndex, stay.lng, stay.lat, 1)
           : [];
         for (const row of shopNear) {
           const [x, y] = project(row.station.lng, row.station.lat, cam, w, h);

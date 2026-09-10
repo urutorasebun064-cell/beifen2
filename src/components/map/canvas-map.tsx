@@ -3377,6 +3377,9 @@ export function CanvasMap() {
     const base = document.createElement("canvas");
     const bg = base.getContext("2d", { alpha: false });
     if (!bg) return;
+    const rails = document.createElement("canvas");
+    const rg = rails.getContext("2d", { alpha: true });
+    if (!rg) return;
     let baseKey = "";
 
     const applyTransform = (g: CanvasRenderingContext2D, dpr: number) => {
@@ -3399,17 +3402,22 @@ export function CanvasMap() {
         canvas.height = Math.max(1, Math.floor(cssH * dpr));
         base.width = canvas.width;
         base.height = canvas.height;
+        rails.width = canvas.width;
+        rails.height = canvas.height;
       } catch {
         canvas.width = cssW;
         canvas.height = cssH;
         base.width = cssW;
         base.height = cssH;
+        rails.width = cssW;
+        rails.height = cssH;
         sizeRef.current.dpr = 1;
       }
       canvas.style.width = `${cssW}px`;
       canvas.style.height = `${cssH}px`;
       applyTransform(ctx, sizeRef.current.dpr);
       applyTransform(bg, sizeRef.current.dpr);
+      applyTransform(rg, sizeRef.current.dpr);
       baseKey = "";
       kick();
     };
@@ -3568,8 +3576,10 @@ export function CanvasMap() {
       bg.lineCap = "round";
       bg.lineJoin = "round";
       const immersed = Boolean(useMapStore.getState().selectedStay);
+      rg.clearRect(0, 0, w, h);
       if (!immersed) {
       paintRails(bg, cam, w, h, bounds);
+      paintRails(rg, cam, w, h, bounds);
 
       if (cam.zoom <= 13.6 && !journey && !useMapStore.getState().mountainLayer) {
         bg.setLineDash([5, 6]);
@@ -4086,7 +4096,7 @@ export function CanvasMap() {
               ctx.beginPath();
               ctx.arc(ring.cx, ring.cy, ring.rad, 0, Math.PI * 2);
               ctx.clip();
-              paintRails(ctx, camRef.current, w, h, bounds);
+              ctx.drawImage(rails, 0, 0, w, h);
               ctx.restore();
             }
             ctx.globalAlpha = stayFade;
@@ -4693,18 +4703,6 @@ export function CanvasMap() {
         }
         return;
       }
-      {
-        const me = useMapStore.getState().userLocation;
-        const walk = walkRef.current;
-        if (me) {
-          const [ux, uy] = project(walk.set ? walk.lng : me.lng, walk.set ? walk.lat : me.lat, cam, w, h);
-          if (Number.isFinite(ux) && Math.hypot(ux - sx, uy - sy) < 42) {
-            const s = useMapStore.getState();
-            s.setRingMode(ringIsHidden(s) ? "on" : "off");
-            return;
-          }
-        }
-      }
       for (const pin of useMapStore.getState().partyPins) {
         const [x, y] = project(pin.lng, pin.lat, cam, w, h);
         if (Math.hypot(x - sx, y - sy) < 28 || Math.hypot(x - sx, y - 18 - sy) < 22) {
@@ -4830,6 +4828,18 @@ export function CanvasMap() {
           }
         }
         return;
+      }
+      {
+        const me = useMapStore.getState().userLocation;
+        const walk = walkRef.current;
+        if (me) {
+          const [ux, uy] = project(walk.set ? walk.lng : me.lng, walk.set ? walk.lat : me.lat, cam, w, h);
+          if (Number.isFinite(ux) && Math.hypot(ux - sx, uy - sy) < 24) {
+            const s = useMapStore.getState();
+            s.setRingMode(ringIsHidden(s) ? "on" : "off");
+            return;
+          }
+        }
       }
       if (rideHere()) return;
       for (const ap of AIRPORTS) {

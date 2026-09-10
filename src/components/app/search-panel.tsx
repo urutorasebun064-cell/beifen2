@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { ArrowUpDown, MapPin, Search, X } from "lucide-react";
-import { copies, displayName } from "@/lib/i18n";
+import { copies, displayName, toJa } from "@/lib/i18n";
 import { tokyoParts, toHhmm, arriveHhmmOf, NODA, isInJapan, haversine, stationsNearPlace, walkMinutes } from "@/lib/rail/geo";
 import { liveDelayFor, stampJourneyDelay } from "@/lib/rail/delay";
 import { railsMatch } from "@/lib/rail/yahoo";
@@ -293,34 +293,40 @@ export async function applyTrip(origin: StationHit | { lng: number; lat: number 
 
   const oName =
     "name" in origin && origin.name
-      ? origin.name
+      ? toJa(origin.name)
       : stationsNearPlace(useMapStore.getState().stationIndex, origin.lng, origin.lat, 1)[0]?.station.name ?? "";
+  const destName = toJa(dest.name);
   const journeys: Journey[] = [];
   const ingest = (data: { ok?: boolean; journey?: Journey; journeys?: Journey[] }, into: Journey[]) => {
-    if (data.ok === false) return;
     const list = data.journeys?.length ? data.journeys : data.journey ? [data.journey] : [];
     for (const j of list) {
-      if (!j || j.source !== "yahoo") continue;
-      into.push(pinJourneyDest(j, dest));
+      if (!j?.legs?.length) continue;
+      into.push(pinJourneyDest({ ...j, source: j.source || "yahoo" }, dest));
     }
   };
-  const pullYahoo = async (type: string, hh?: number, mm?: number) => {
+  const abortAfter = (ms: number) => {
+    if (typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function") return AbortSignal.timeout(ms);
+    const c = new AbortController();
+    window.setTimeout(() => c.abort(), ms);
+    return c.signal;
+  };
+  const pullYahoo = async (type: string, hh?: number, mm?: number, bare = false) => {
     const qs = new URLSearchParams({
       from: oName,
-      to: dest.name,
+      to: destName,
       olat: String(origin.lat),
       olng: String(origin.lng),
       dlat: String(dest.lat),
       dlng: String(dest.lng),
-      opf: "prefecture" in origin ? origin.prefecture ?? "" : "",
-      dpf: dest.prefecture ?? "",
+      opf: bare ? "" : "prefecture" in origin ? toJa(origin.prefecture ?? "") : "",
+      dpf: bare ? "" : toJa(dest.prefecture ?? ""),
       type,
     });
     if (hh != null) qs.set("hh", String(hh));
     if (mm != null) qs.set("mm", String(mm));
     const rows: Journey[] = [];
     try {
-      const res = await fetch(`/api/transit?${qs}`, { signal: AbortSignal.timeout(14000) });
+      const res = await fetch(`/api/transit?${qs}`, { signal: abortAfter(14000) });
       ingest((await res.json()) as { ok?: boolean; journey?: Journey; journeys?: Journey[] }, rows);
     } catch {
       /* keep empty */
@@ -328,7 +334,7 @@ export async function applyTrip(origin: StationHit | { lng: number; lat: number 
     return rows;
   };
   try {
-    if (oName) {
+    if (oName && destName) {
       const nowMin = tokyoParts(simNow()).minutes;
       const due = (j: Journey) => {
         const dep = departDue(j.departHhmm, nowMin) + Math.max(0, j.delayMin ?? 0);
@@ -338,10 +344,13 @@ export async function applyTrip(origin: StationHit | { lng: number; lat: number 
       };
       const clock = tokyoParts(simNow());
       let yahoo = await pullYahoo("1", clock.hour, clock.minute);
+      if (!yahoo.length) yahoo = await pullYahoo("1", clock.hour, clock.minute, true);
       let live = yahoo.filter(due);
+      if (!live.length) live = yahoo;
       if (!live.length) {
         const last = await pullYahoo("2");
         live = last.filter(due);
+        if (!live.length) live = last;
       }
       if (!live.length) {
         const firsts = await pullYahoo("3", 4, 50);
@@ -358,10 +367,13 @@ export async function applyTrip(origin: StationHit | { lng: number; lat: number 
       const arr = departDue(j.arriveHhmm, nowMin);
       return arr > 0 && dep > -25;
     };
-    const yahooAll = journeys.filter((j) => j.source === "yahoo");
-    let live: Journey[] = yahooAll.filter(stillDue);
-    if (!live.length) live = yahooAll;
     const store = useMapStore.getState();
+    let live: Journey[] = journeys.filter(stillDue);
+    if (!live.length) live = journeys.slice();
+    if (!live.length) {
+      const local = planJourney(store.lines, store.stationIndex, origin, dest, simNow());
+      if (local) live = [local];
+    }
     if (!live.length) {
       store.setJourneys([]);
       if (!silent) store.setSearching(false);

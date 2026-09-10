@@ -289,7 +289,7 @@ export function AppShell() {
           <KonbiniChat />
         </>
       ) : (
-      <aside className={`pointer-events-none absolute inset-x-0 bottom-0 z-10 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] md:inset-y-0 md:top-0 md:right-auto md:w-[360px] md:p-4 md:pt-24 ${selectedTrain ? "max-md:hidden" : ""}`}>
+      <aside className={`pointer-events-none absolute inset-x-0 bottom-0 z-10 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] md:inset-y-0 md:top-0 md:right-auto md:w-[360px] md:p-4 md:pt-24 ${selectedTrain && !journeys.length ? "max-md:hidden" : ""}`}>
         <div
           className={`pointer-events-auto flex flex-col overflow-hidden rounded-[var(--radius-xl)] bg-surface/94 shadow-[var(--shadow-border)] backdrop-blur-md ${
             sheetOpen
@@ -354,7 +354,7 @@ export function AppShell() {
       </aside>
       )}
 
-      {selectedTrain && !selectedStay && !selectedKonbini ? (
+      {selectedTrain && !selectedStay && !selectedKonbini && !journeys.length ? (
         <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
           <div className="pointer-events-auto mx-auto w-full max-w-md">
             <FollowCard />

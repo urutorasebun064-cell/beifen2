@@ -536,7 +536,7 @@ export function RoutePanel({ journey }: { journey: Journey }) {
         </Button>
       </div>
 
-      <ul className="flex flex-col gap-1">
+      <ul className="flex max-h-64 flex-col gap-1 overflow-y-auto">
         {list.map((j, i) => {
           const shown = stampJourneyDelay(j, liveTrains);
           const active = journeys.length > 1 ? journeys.indexOf(j) === journeyIndex : true;

@@ -345,7 +345,7 @@ export async function applyTrip(origin: StationHit | { lng: number; lat: number 
     if (mm != null) qs.set("mm", String(mm));
     const rows: Journey[] = [];
     try {
-      const res = await fetch(`/api/transit?${qs}`, { signal: abortAfter(14000) });
+      const res = await fetch(`/api/transit?${qs}`, { signal: abortAfter(24000) });
       ingest((await res.json()) as { ok?: boolean; journey?: Journey; journeys?: Journey[] }, rows);
     } catch {
       /* keep empty */
@@ -389,15 +389,6 @@ export async function applyTrip(origin: StationHit | { lng: number; lat: number 
     const store = useMapStore.getState();
     let live: Journey[] = journeys.filter(stillDue);
     if (!live.length) live = journeys.slice();
-    if (!live.length) {
-      const local = localJourneys(origin, dest).list;
-      const running = liveJourneys(origin, dest);
-      live = preferOfficial(local.concat(running));
-    }
-    if (!live.length) {
-      const one = planJourney(store.lines, store.stationIndex, origin, dest, simNow());
-      if (one) live = [one];
-    }
     if (!live.length) {
       store.setJourneys([]);
       if (!silent) store.setSearching(false);

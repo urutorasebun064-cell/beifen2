@@ -16,6 +16,29 @@ function yahooName(name: string, pf: string) {
   return p ? `${n}(${p})` : n;
 }
 
+function shortPf(pf: string) {
+  return pf.replace(/[都道府県]$/u, "").trim();
+}
+
+function nameForms(name: string, pf: string) {
+  const n = name.replace(/駅$/u, "").trim();
+  const ke = n.replace(/ヶ/g, "ケ");
+  const ge = n.replace(/ケ/g, "ヶ");
+  const out: string[] = [];
+  const add = (x: string) => {
+    const v = x.trim();
+    if (v && !out.includes(v)) out.push(v);
+  };
+  add(yahooName(n, pf));
+  add(yahooName(n, shortPf(pf)));
+  add(n);
+  add(yahooName(ke, pf));
+  add(ke);
+  add(yahooName(ge, pf));
+  add(ge);
+  return out.slice(0, 4);
+}
+
 function parseHhmm(s: string | undefined) {
   const m = String(s ?? "").match(/(\d{1,2}):(\d{2})/);
   if (!m) return null;
@@ -36,6 +59,8 @@ function jid(j: Journey) {
   return `${j.departHhmm}|${j.arriveHhmm}|${j.legs.map((l) => l.lineName ?? l.kind).join(",")}`;
 }
 
+type St = { name?: string; code?: string; label?: string; value?: string };
+
 async function yahooPage(
   from: string,
   to: string,
@@ -47,7 +72,8 @@ async function yahooPage(
   type: string,
   origin: RouteStop,
   dest: RouteStop,
-): Promise<Journey[]> {
+  extra?: { flatlon?: string; tlatlon?: string },
+): Promise<{ journeys: Journey[]; fromList: St[]; toList: St[] }> {
   const qs = new URLSearchParams({
     from,
     to,
@@ -67,15 +93,46 @@ async function yahooPage(
     ex: "1",
     hb: "1",
   });
+  if (extra?.flatlon) qs.set("flatlon", extra.flatlon);
+  if (extra?.tlatlon) qs.set("tlatlon", extra.tlatlon);
   const res = await fetch(`https://transit.yahoo.co.jp/search/result?${qs}`, {
     headers: {
       "User-Agent": "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/120.0.0.0 Mobile Safari/537.36",
       "Accept-Language": "ja",
     },
-    signal: AbortSignal.timeout(12000),
+    signal: AbortSignal.timeout(10000),
   });
-  if (!res.ok) return [];
-  return journeysFromYahoo(await res.text(), origin, dest);
+  if (!res.ok) return { journeys: [], fromList: [], toList: [] };
+  const html = await res.text();
+  return { journeys: journeysFromYahoo(html, origin, dest), ...stationLists(html) };
+}
+
+function stationLists(html: string): { fromList: St[]; toList: St[] } {
+  try {
+    const m = html.match(/<script id="__NEXT_DATA__"[^>]*>([\s\S]*?)<\/script>/);
+    if (!m) return { fromList: [], toList: [] };
+    const json = JSON.parse(m[1]!) as {
+      props?: { pageProps?: { naviSearchParam?: { otherQueryInfo?: { fromList?: St[]; toList?: St[] } } } };
+    };
+    const oi = json.props?.pageProps?.naviSearchParam?.otherQueryInfo;
+    return { fromList: oi?.fromList ?? [], toList: oi?.toList ?? [] };
+  } catch {
+    return { fromList: [], toList: [] };
+  }
+}
+
+function pickCode(list: St[], pf: string, name: string) {
+  if (!list.length) return "";
+  const p = shortPf(pf);
+  const n = name.replace(/駅$/u, "").trim();
+  const blob = (x: St) => `${x.name ?? ""}${x.label ?? ""}`;
+  const hit =
+    list.find((x) => p && blob(x).includes(p)) ??
+    list.find((x) => pf && blob(x).includes(pf)) ??
+    list.find((x) => (x.name ?? "").replace(/駅$/u, "") === n) ??
+    list.find((x) => x.code);
+  if (hit?.code) return `,,${hit.code}`;
+  return hit?.value && /,,\d/.test(hit.value) ? hit.value : "";
 }
 
 export const Route = createFileRoute("/api/transit")({
@@ -120,15 +177,47 @@ export const Route = createFileRoute("/api/transit")({
         const dest: RouteStop = { name: to, lng: dlng, lat: dlat, prefecture: dpf };
         try {
           const diaP = fetchYahooDiaInfo();
-          let first = await yahooPage(fromQ, toQ, y ?? "", mo ?? "", d ?? "", hh, mm, type, origin, dest);
+          const froms = nameForms(from, opf);
+          const tos = nameForms(to, dpf);
+          let first: Journey[] = [];
+          let usedFrom = fromQ;
+          let usedTo = toQ;
+          const pairs: Array<{ from: string; to: string; extra?: { flatlon?: string; tlatlon?: string } }> = [];
+          const addPair = (f: string, t: string, extra?: { flatlon?: string; tlatlon?: string }) => {
+            if (!f || !t) return;
+            if (pairs.some((p) => p.from === f && p.to === t && (p.extra?.flatlon ?? "") === (extra?.flatlon ?? "") && (p.extra?.tlatlon ?? "") === (extra?.tlatlon ?? ""))) return;
+            pairs.push({ from: f, to: t, extra });
+          };
+          addPair(fromQ, toQ);
+          addPair(froms[1] ?? fromQ, tos[1] ?? toQ);
+          addPair(froms[2] ?? from.replace(/駅$/u, ""), tos[2] ?? to.replace(/駅$/u, ""));
+          for (const pair of pairs) {
+            usedFrom = pair.from;
+            usedTo = pair.to;
+            const page = await yahooPage(usedFrom, usedTo, y ?? "", mo ?? "", d ?? "", hh, mm, type, origin, dest, pair.extra);
+            first = page.journeys;
+            if (first.length) break;
+            const fc = pickCode(page.fromList, opf, from);
+            const tc = pickCode(page.toList, dpf, to);
+            if (fc || tc) {
+              const coded = await yahooPage(usedFrom, usedTo, y ?? "", mo ?? "", d ?? "", hh, mm, type, origin, dest, {
+                flatlon: fc || undefined,
+                tlatlon: tc || undefined,
+              });
+              if (coded.journeys.length) {
+                first = coded.journeys;
+                break;
+              }
+            }
+          }
           if (type === "1" && first.length) {
             const last = parseHhmm(first[first.length - 1]?.departHhmm);
             if (last) {
               const n = bumpMinute(last.hh, last.mm, 1);
-              const extra = await yahooPage(fromQ, toQ, y ?? "", mo ?? "", d ?? "", n.hh, n.mm, "1", origin, dest);
-              if (extra.length) {
+              const extra = await yahooPage(usedFrom, usedTo, y ?? "", mo ?? "", d ?? "", n.hh, n.mm, "1", origin, dest);
+              if (extra.journeys.length) {
                 const seen = new Set(first.map(jid));
-                for (const j of extra) {
+                for (const j of extra.journeys) {
                   const id = jid(j);
                   if (seen.has(id)) continue;
                   seen.add(id);
@@ -139,7 +228,7 @@ export const Route = createFileRoute("/api/transit")({
           }
           const dia = await diaP.catch(() => []);
           const journeys = first.map((j) => stampYahooDia(j, dia));
-          cache.set(cacheId, { at: Date.now(), journey: journeys[0], journeys });
+          if (journeys.length) cache.set(cacheId, { at: Date.now(), journey: journeys[0], journeys });
           return Response.json({ ok: true, journey: journeys[0] ?? null, journeys });
         } catch {
           return Response.json({ ok: false, error: "transit" });

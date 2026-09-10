@@ -3754,12 +3754,7 @@ export function CanvasMap() {
         if (!radarOnNow) radarWas = false;
         if (!introDoneRef.current && !radarOnNow && !camLerpRef.current) {
           const st = useMapStore.getState();
-          const located =
-            st.locateStatus === "ok" ||
-            st.locateStatus === "outside" ||
-            st.locateStatus === "denied" ||
-            st.locateStatus === "error";
-          if (located && st.userLocation && w > 2 && h > 2) {
+          if (st.locateStatus === "ok" && st.userLocation && w > 2 && h > 2) {
             if (!introHoldUntil) introHoldUntil = ts + 820;
             if (ts >= introHoldUntil) {
               introDoneRef.current = true;
@@ -3775,6 +3770,8 @@ export function CanvasMap() {
               setTiltUi(HOME_TILT);
               setZoomUi(z);
             }
+          } else if (st.locateStatus === "outside" || st.locateStatus === "denied" || st.locateStatus === "error") {
+            introDoneRef.current = true;
           }
         }
         const anim = camLerpRef.current;

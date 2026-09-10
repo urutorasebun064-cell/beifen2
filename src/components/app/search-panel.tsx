@@ -16,6 +16,23 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useMapStore, simNow } from "@/store/map-store";
 
+function nearestRailStop(lng: number, lat: number): StationHit | null {
+  const rows = stationsNearPlace(useMapStore.getState().stationIndex, lng, lat, 8);
+  if (!rows.length) return null;
+  const best = rows[0]!.km;
+  const close = rows.filter((r) => r.km <= best + 0.12);
+  const tx = close.find((r) =>
+    r.station.lines.some((l) => /つくば|TX/i.test(l.name) || /つくば|TX/i.test(l.id)),
+  );
+  if (tx) return tx.station as StationHit;
+  return rows[0]!.station as StationHit;
+}
+
+function asSearchOrigin(origin: StationHit | { lng: number; lat: number }): StationHit | { lng: number; lat: number } {
+  if ("name" in origin && origin.name) return origin;
+  return nearestRailStop(origin.lng, origin.lat) ?? origin;
+}
+
 function pinJourneyDest(j: Journey, dest: StationHit): Journey {
   const d = { name: dest.name, lng: dest.lng, lat: dest.lat, prefecture: dest.prefecture };
   const dn = dest.name.replace(/駅$/u, "");
@@ -277,6 +294,7 @@ function liveJourneys(origin: StationHit | { lng: number; lat: number }, dest: S
 }
 
 export async function applyTrip(origin: StationHit | { lng: number; lat: number }, dest: StationHit, opts?: { silent?: boolean; skipCamera?: boolean }) {
+  origin = asSearchOrigin(origin);
   if ("name" in origin && stationKey(origin) === stationKey(dest)) {
     useMapStore.getState().setDest(dest);
     useMapStore.getState().setJourneys([]);
@@ -401,6 +419,7 @@ export async function applyTrip(origin: StationHit | { lng: number; lat: number 
     const idx = Math.max(0, upcoming ? final.indexOf(upcoming) : 0);
     store.setJourneys(final, idx);
     if (upcoming) lockJourneyTrain(upcoming, { camera: !silent && !skipCamera, keepSheet: true });
+    store.setSheetOpen(true);
     void calibrateCorridor(final);
   }
 }

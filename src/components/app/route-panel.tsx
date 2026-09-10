@@ -451,7 +451,8 @@ function lockRide(leg: RouteLeg, opts?: { keepSheet?: boolean }) {
     store.selectStation(null);
     store.selectTrain(pick);
     store.setFollowTrainId(null);
-    if (!opts?.keepSheet) store.setSheetOpen(false);
+    if (opts?.keepSheet) store.setSheetOpen(true);
+    else store.setSheetOpen(false);
   }
   return pick;
 }

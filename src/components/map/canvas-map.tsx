@@ -31,7 +31,7 @@ import { focusStay } from "@/components/app/stay-catalog";
 import { focusKonbini } from "@/components/app/konbini-panel";
 import { KONBINI_META, konbiniLabel, konbiniRingM, metersTo, pullKonbini } from "@/lib/konbini";
 import { drawRadarLayer, RADAR_JAPAN_LAT, RADAR_JAPAN_LNG, RADAR_JAPAN_ZOOM } from "@/lib/radar";
-import { drawRoads, pullRoads, SHOW_ZOOM } from "@/lib/roads";
+import { drawRoads, pullRoads, ringScreen, SHOW_ZOOM } from "@/lib/roads";
 import { STAYS, stayLabel } from "@/data/stays";
 import { PEAKS, FUJI_H, peakLabel, type Peak } from "@/data/peaks";
 import { useMapStore, simNow } from "@/store/map-store";
@@ -3417,6 +3417,75 @@ export function CanvasMap() {
     const ro = new ResizeObserver(resize);
     ro.observe(wrap);
 
+    const paintRails = (
+      g: CanvasRenderingContext2D,
+      cam: Cam,
+      w: number,
+      h: number,
+      bounds: { west: number; south: number; east: number; north: number },
+    ) => {
+      if (useMapStore.getState().selectedStay) return;
+      const journey = useMapStore.getState().journey;
+      g.lineCap = "round";
+      g.lineJoin = "round";
+      const zoomW = cam.zoom >= 14.6 ? 0.92 : cam.zoom >= 13.2 ? 1 : cam.zoom >= 12 ? 1 : 1;
+      const strokeLine = (line: LineRuntime, width: number, color: string) => {
+        g.strokeStyle = color;
+        g.lineWidth = Math.max(1.8, width);
+        const src = cam.zoom >= 11.2 ? line.path : line.drawPath.length >= 2 ? line.drawPath : line.path;
+        const path = new Path2D();
+        addPoly(path, src, cam, w, h, cam.zoom >= 13.2 ? 1.6 : 2.8);
+        g.stroke(path);
+      };
+      const ordered = [...lineRef.current].sort((a, b) => {
+        const rank = (k: string) => (k === "bus" ? 0 : k === "subway" ? 1 : k === "private" ? 2 : k === "jr" ? 3 : 4);
+        return rank(a.kind) - rank(b.kind);
+      });
+      for (const line of ordered) {
+        if (useMapStore.getState().radarEnabled || useMapStore.getState().mountainLayer) continue;
+        if (!lineVisible(line, bounds, cam.zoom)) continue;
+        g.globalAlpha = journey ? 0.38 : 0.7;
+        if (line.kind === "shinkansen") {
+          strokeLine(line, 3.6 * zoomW, "#c8c2b0");
+          strokeLine(line, 2 * zoomW, line.color);
+        } else if (line.kind === "subway") {
+          strokeLine(line, 1.4 * zoomW, line.color);
+        } else if (line.kind === "bus") {
+          continue;
+        } else {
+          strokeLine(line, (line.kind === "jr" ? 2.25 : 1.6) * zoomW, line.color);
+        }
+      }
+      g.globalAlpha = 1;
+      if (cam.zoom >= 8.6 && !useMapStore.getState().radarEnabled && !useMapStore.getState().mountainLayer) {
+        const selTrain = useMapStore.getState().selectedTrain;
+        const selStation = useMapStore.getState().selectedStation;
+        const tripHot = useMapStore.getState().journey;
+        const hot = tripHot
+          ? journeyAnchorNames(tripHot)
+          : new Set([selTrain?.nextStop, selTrain?.prevStop, selStation?.name].filter(Boolean) as string[]);
+        for (const line of lineRef.current) {
+          if (!lineVisible(line, bounds, cam.zoom)) continue;
+          for (const s of line.stops) {
+            if (s.lng < bounds.west || s.lng > bounds.east || s.lat < bounds.south || s.lat > bounds.north) continue;
+            if (cam.zoom < 10.2 && cityMinZoom(s.n) > cam.zoom) continue;
+            const [x, y] = project(s.lng, s.lat, cam, w, h);
+            const hi = hot.has(s.n);
+            const jr = line.kind === "jr" || line.kind === "shinkansen";
+            const r = hi ? 4.4 : jr ? (cam.zoom >= 14.5 ? 3.15 : cam.zoom >= 12.5 ? 2.85 : 2.55) : cam.zoom >= 14.5 ? 2.4 : cam.zoom >= 12.5 ? 2.2 : 2;
+            g.fillStyle = hi ? "#ffe08a" : jr ? "#070b08" : "#1a241c";
+            g.beginPath();
+            g.arc(x, y, r, 0, Math.PI * 2);
+            g.fill();
+            g.fillStyle = hi ? "#1a241c" : jr ? "rgba(214,204,170,0.55)" : "rgba(236,228,200,0.78)";
+            g.beginPath();
+            g.arc(x, y, r * 0.42, 0, Math.PI * 2);
+            g.fill();
+          }
+        }
+      }
+    };
+
     const paintBase = (
       cam: Cam,
       w: number,
@@ -3500,35 +3569,7 @@ export function CanvasMap() {
       bg.lineJoin = "round";
       const immersed = Boolean(useMapStore.getState().selectedStay);
       if (!immersed) {
-      const zoomW = cam.zoom >= 14.6 ? 0.92 : cam.zoom >= 13.2 ? 1 : cam.zoom >= 12 ? 1 : 1;
-      const strokeLine = (line: LineRuntime, width: number, color: string) => {
-        bg.strokeStyle = color;
-        bg.lineWidth = Math.max(1.8, width);
-        const src = cam.zoom >= 11.2 ? line.path : line.drawPath.length >= 2 ? line.drawPath : line.path;
-        const path = new Path2D();
-        addPoly(path, src, cam, w, h, cam.zoom >= 13.2 ? 1.6 : 2.8);
-        bg.stroke(path);
-      };
-      const ordered = [...lineRef.current].sort((a, b) => {
-        const rank = (k: string) => (k === "bus" ? 0 : k === "subway" ? 1 : k === "private" ? 2 : k === "jr" ? 3 : 4);
-        return rank(a.kind) - rank(b.kind);
-      });
-      for (const line of ordered) {
-        if (useMapStore.getState().radarEnabled || useMapStore.getState().mountainLayer) continue;
-        if (!lineVisible(line, bounds, cam.zoom)) continue;
-        bg.globalAlpha = journey ? 0.38 : 0.7;
-        if (line.kind === "shinkansen") {
-          strokeLine(line, 3.6 * zoomW, "#c8c2b0");
-          strokeLine(line, 2 * zoomW, line.color);
-        } else if (line.kind === "subway") {
-          strokeLine(line, 1.4 * zoomW, line.color);
-        } else if (line.kind === "bus") {
-          continue;
-        } else {
-          strokeLine(line, (line.kind === "jr" ? 2.25 : 1.6) * zoomW, line.color);
-        }
-      }
-      bg.globalAlpha = 1;
+      paintRails(bg, cam, w, h, bounds);
 
       if (cam.zoom <= 13.6 && !journey && !useMapStore.getState().mountainLayer) {
         bg.setLineDash([5, 6]);
@@ -3568,34 +3609,6 @@ export function CanvasMap() {
         }
         bg.setLineDash([]);
         bg.globalAlpha = 1;
-      }
-
-      if (cam.zoom >= 8.6 && !useMapStore.getState().radarEnabled && !useMapStore.getState().mountainLayer) {
-        const selTrain = useMapStore.getState().selectedTrain;
-        const selStation = useMapStore.getState().selectedStation;
-        const tripHot = useMapStore.getState().journey;
-        const hot = tripHot
-          ? journeyAnchorNames(tripHot)
-          : new Set([selTrain?.nextStop, selTrain?.prevStop, selStation?.name].filter(Boolean) as string[]);
-        for (const line of lineRef.current) {
-          if (!lineVisible(line, bounds, cam.zoom)) continue;
-          for (const s of line.stops) {
-            if (s.lng < bounds.west || s.lng > bounds.east || s.lat < bounds.south || s.lat > bounds.north) continue;
-            if (cam.zoom < 10.2 && cityMinZoom(s.n) > cam.zoom) continue;
-            const [x, y] = project(s.lng, s.lat, cam, w, h);
-            const hi = hot.has(s.n);
-            const jr = line.kind === "jr" || line.kind === "shinkansen";
-            const r = hi ? 4.4 : jr ? (cam.zoom >= 14.5 ? 3.15 : cam.zoom >= 12.5 ? 2.85 : 2.55) : cam.zoom >= 14.5 ? 2.4 : cam.zoom >= 12.5 ? 2.2 : 2;
-            bg.fillStyle = hi ? "#ffe08a" : jr ? "#070b08" : "#1a241c";
-            bg.beginPath();
-            bg.arc(x, y, r, 0, Math.PI * 2);
-            bg.fill();
-            bg.fillStyle = hi ? "#1a241c" : jr ? "rgba(214,204,170,0.55)" : "rgba(236,228,200,0.78)";
-            bg.beginPath();
-            bg.arc(x, y, r * 0.42, 0, Math.PI * 2);
-            bg.fill();
-          }
-        }
       }
 
       for (const ap of AIRPORTS) {
@@ -4009,6 +4022,22 @@ export function CanvasMap() {
         paintBase(camRef.current, w, h, bounds);
         applyTransform(ctx, dpr);
         ctx.drawImage(base, 0, 0, w, h);
+        {
+          const user = useMapStore.getState().userLocation;
+          if (user) {
+            const walk = walkRef.current;
+            if (!walk.set) {
+              walk.lng = user.lng;
+              walk.lat = user.lat;
+              walk.set = true;
+            } else {
+              const gap = haversine([walk.lng, walk.lat], [user.lng, user.lat]) * 1000;
+              const k = gap > 80 ? 0.94 : gap > 28 ? 0.72 : gap > 10 ? 0.42 : camRef.current.zoom >= 14 ? 0.2 : 0.26;
+              walk.lng += (user.lng - walk.lng) * k;
+              walk.lat += (user.lat - walk.lat) * k;
+            }
+          }
+        }
         const stayOnNow =
           Boolean(useMapStore.getState().selectedStay) &&
           !useMapStore.getState().stayWalk &&
@@ -4041,6 +4070,27 @@ export function CanvasMap() {
             st.radarHidden,
             ts,
           );
+        }
+        {
+          const user = useMapStore.getState().userLocation;
+          const walk = walkRef.current;
+          const st = useMapStore.getState();
+          if (user && walk.set && !ringIsHidden(st)) {
+            const ringM = st.konbiniBrand ? konbiniRingM(user, st.stationIndex, st.nearestStations) : undefined;
+            const proj = (lng: number, lat: number, alt?: number) => project(lng, lat, camRef.current, w, h, alt);
+            ctx.globalAlpha = 1;
+            drawRoads(ctx, camRef.current, w, h, proj, walk, ringM);
+            const ring = ringScreen(walk, proj, ringM);
+            if (Number.isFinite(ring.cx) && ring.rad >= 4) {
+              ctx.save();
+              ctx.beginPath();
+              ctx.arc(ring.cx, ring.cy, ring.rad, 0, Math.PI * 2);
+              ctx.clip();
+              paintRails(ctx, camRef.current, w, h, bounds);
+              ctx.restore();
+            }
+            ctx.globalAlpha = stayFade;
+          }
         }
         drawLandmarks(ctx, camRef.current, w, h);
         const followed = useMapStore.getState().followTrainId;
@@ -4247,18 +4297,8 @@ export function CanvasMap() {
             walk.lng = user.lng;
             walk.lat = user.lat;
             walk.set = true;
-          } else {
-            const gap = haversine([walk.lng, walk.lat], [user.lng, user.lat]) * 1000;
-            const k = gap > 80 ? 0.94 : gap > 28 ? 0.72 : gap > 10 ? 0.42 : camRef.current.zoom >= 14 ? 0.2 : 0.26;
-            walk.lng += (user.lng - walk.lng) * k;
-            walk.lat += (user.lat - walk.lat) * k;
           }
           const st = useMapStore.getState();
-          const hideRing = ringIsHidden(st);
-          if (!hideRing) {
-            const ringM = st.konbiniBrand ? konbiniRingM(user, st.stationIndex, st.nearestStations) : undefined;
-            drawRoads(ctx, camRef.current, w, h, (lng, lat, alt) => project(lng, lat, camRef.current, w, h, alt), walk, ringM);
-          }
           drawJourneyPulse(ctx, camRef.current, w, h, ts, lineRef.current, "walk");
           const konbiniSel = st.selectedKonbini;
           let kPin: { x: number; y: number } | null = null;

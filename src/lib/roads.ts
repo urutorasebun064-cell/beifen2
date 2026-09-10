@@ -125,7 +125,7 @@ export function pullRoads(lng: number, lat: number, zoom: number, meters = RING_
   if (z > 14) cover(lng, lat, z - 1, Math.max(1, rad - 1));
 }
 
-function ringPx(
+export function ringScreen(
   origin: { lng: number; lat: number },
   project: (lng: number, lat: number, alt?: number) => [number, number],
   meters = RING_M,
@@ -228,7 +228,7 @@ export function drawRoads(
   meters = RING_M,
 ) {
   const origin = user ?? { lng: cam.lng, lat: cam.lat };
-  const ring = ringPx(origin, project, meters);
+  const ring = ringScreen(origin, project, meters);
   if (!Number.isFinite(ring.cx) || !Number.isFinite(ring.cy) || ring.rad < 4) return;
 
   g.save();

@@ -32,6 +32,7 @@ export function AppShell() {
   const sheetOpen = useMapStore((s) => s.sheetOpen);
   const originStation = useMapStore((s) => s.originStation);
   const destStation = useMapStore((s) => s.destStation);
+  const journeys = useMapStore((s) => s.journeys);
   const selectedStay = useMapStore((s) => s.selectedStay);
   const selectedKonbini = useMapStore((s) => s.selectedKonbini);
   const selectedPeak = useMapStore((s) => s.selectedPeak);
@@ -291,7 +292,9 @@ export function AppShell() {
       <aside className={`pointer-events-none absolute inset-x-0 bottom-0 z-10 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] md:inset-y-0 md:top-0 md:right-auto md:w-[360px] md:p-4 md:pt-24 ${selectedTrain ? "max-md:hidden" : ""}`}>
         <div
           className={`pointer-events-auto flex flex-col overflow-hidden rounded-[var(--radius-xl)] bg-surface/94 shadow-[var(--shadow-border)] backdrop-blur-md ${
-            sheetOpen ? "max-h-[56vh] gap-3 p-3 md:max-h-[calc(100dvh-7.5rem)] md:p-4" : "p-2 md:p-3"
+            sheetOpen
+              ? `${journeys.length ? "max-h-[72vh]" : "max-h-[56vh]"} gap-3 p-3 md:max-h-[calc(100dvh-7.5rem)] md:p-4`
+              : "p-2 md:p-3"
           }`}
         >
           <div className="relative flex w-full items-center justify-center py-1">

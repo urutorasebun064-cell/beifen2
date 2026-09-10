@@ -1046,13 +1046,26 @@ export function SearchPanel() {
   }, [destStation?.name, lang]);
 
   const q = focus === "from" ? fromText : focus === "to" ? toText : "";
-  const showHits = Boolean(focus) && q.trim().length > 0;
+  const fieldLocked =
+    focus === "from"
+      ? Boolean(originStation && stationTextMatch(originStation, fromText))
+      : focus === "to"
+        ? Boolean(destStation && stationTextMatch(destStation, toText))
+        : false;
+  const showHits = Boolean(focus) && q.trim().length > 0 && !fieldLocked;
   const resolved = showHits
     ? resolveStationQuery(index, q, null, useMapStore.getState().userLocation)
     : null;
   const hits = resolved?.suggestions ?? [];
   const hitsRef = useRef(hits);
   hitsRef.current = hits;
+
+  const blurFields = () => {
+    setFocus(null);
+    if (typeof document !== "undefined" && document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
+    }
+  };
 
   const pick = (hit: StationHit) => {
     const field = useMapStore.getState().pickField ?? focus ?? "to";
@@ -1061,7 +1074,7 @@ export function SearchPanel() {
     fillPickedStation(chosen, field);
     if (field === "from") setFromText(displayName(chosen.name, lang));
     else setToText(displayName(chosen.name, lang));
-    setFocus(null);
+    blurFields();
   };
 
   const clearFrom = () => {
@@ -1087,6 +1100,7 @@ export function SearchPanel() {
     if (!origin || !dest) return;
     if (dest.name) setToText(displayName(dest.name, lang));
     if ("name" in origin && typeof origin.name === "string") setFromText(displayName(origin.name, lang));
+    blurFields();
     void applyTrip(origin, dest);
   };
 

@@ -299,7 +299,7 @@ export function AppShell() {
         <div
           className={`pointer-events-auto mx-auto flex w-full max-w-md flex-col overflow-hidden rounded-[var(--radius-xl)] bg-surface/94 shadow-[var(--shadow-border)] backdrop-blur-md ${
             sheetOpen
-              ? "h-[calc(100svh-22.25rem-env(safe-area-inset-top))] max-h-[calc(100svh-22.25rem-env(safe-area-inset-top))] gap-3 p-3"
+              ? "max-h-[calc(100svh-22.25rem-env(safe-area-inset-top))] gap-3 p-3"
               : "p-2"
           }`}
         >
@@ -347,7 +347,7 @@ export function AppShell() {
             <>
               <SearchPanel />
               <div className="h-px bg-border" />
-              <div className="min-h-0 flex-1 overflow-y-auto pr-0.5">
+              <div className="overflow-y-auto pr-0.5">
                 {night ? <p className="mb-2 text-sm text-fg-muted">{t.night}</p> : null}
                 <DetailPanel />
               </div>

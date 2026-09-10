@@ -85,7 +85,15 @@ export function FollowCard() {
           variant="ghost"
           size="iconSm"
           aria-label={t.close}
-          onClick={() => useMapStore.getState().dismissPick()}
+          onClick={() => {
+            const s = useMapStore.getState();
+            const hadTrip = Boolean(s.journey || s.journeys.length);
+            s.dismissPick();
+            if (hadTrip) {
+              s.clearTrip();
+              s.setOrigin(null);
+            }
+          }}
         >
           <X />
         </Button>
@@ -97,12 +105,13 @@ export function FollowCard() {
             size="sm"
             className="min-w-0 flex-1"
             onClick={() => {
+              const s = useMapStore.getState();
               if (live) {
-                useMapStore.getState().setFollowTrainId(null);
+                s.setFollowTrainId(null);
                 return;
               }
-              useMapStore.getState().watchTrain(train);
-              useMapStore.getState().requestFlyTo({ lng: train.lng, lat: train.lat, zoom: 14, bearing: 0, pitch: 0.55 });
+              s.setFollowTrainId(train.id);
+              s.requestFlyTo({ lng: train.lng, lat: train.lat, zoom: 14, bearing: 0, pitch: 0.55 });
             }}
           >
             <TrainFront />

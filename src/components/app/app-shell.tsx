@@ -297,8 +297,10 @@ export function AppShell() {
       ) : (
       <aside className={`pointer-events-none absolute inset-x-0 bottom-0 z-30 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] ${onRide ? "hidden" : ""}`}>
         <div
-          className={`pointer-events-auto mx-auto flex w-full max-w-md max-h-[calc(100svh-19.5rem-env(safe-area-inset-top))] flex-col overflow-hidden rounded-[var(--radius-xl)] bg-surface/94 shadow-[var(--shadow-border)] backdrop-blur-md ${
-            sheetOpen ? "gap-3 p-3" : "p-2"
+          className={`pointer-events-auto mx-auto flex w-full max-w-md flex-col overflow-hidden rounded-[var(--radius-xl)] bg-surface/94 shadow-[var(--shadow-border)] backdrop-blur-md ${
+            sheetOpen
+              ? "max-h-[min(24rem,calc(100svh-24rem-env(safe-area-inset-top)-env(safe-area-inset-bottom)))] gap-3 p-3"
+              : "p-2"
           }`}
         >
           <div className="relative flex w-full items-center justify-center py-1">

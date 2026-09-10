@@ -20,7 +20,7 @@ const VAPID_FILE = join(process.cwd(), ".data", "party-vapid.json");
 type PushSub = { endpoint: string; p256dh: string; auth: string };
 type Member = { id: string; nick: string; token: string; last: number; online: boolean; host?: boolean; lng?: number; lat?: number; pinAt?: number; near?: string; push?: PushSub };
 type Msg = { id: number; nick: string; body: string; at: string; uid?: string };
-type Room = { name: string; pass: string; hostId: string; members: Member[]; messages: Msg[]; msgId: number; msgTotal: number; expiresAt: number; born?: number };
+type Room = { name: string; pass: string; hostId: string; members: Member[]; messages: Msg[]; msgId: number; msgTotal: number; expiresAt: number; born?: number; boundNicks?: Record<string, string> };
 type Saved = Room & { key: string };
 
 type G = typeof globalThis & { __jbPartyRooms?: Map<string, Room>; __jbPartyGone?: Map<string, number> };
@@ -201,6 +201,29 @@ function sameRoom(a: string, b: string) {
   return fa === fb || fa.includes(fb) || fb.includes(fa) || a.includes(b) || b.includes(a);
 }
 
+function packMembers(room: Room) {
+  return JSON.stringify({ v: 2, members: room.members, nicks: room.boundNicks || {} });
+}
+
+function unpackMembers(raw: unknown): { members: Member[]; nicks: Record<string, string> } {
+  let v: unknown = raw;
+  if (typeof raw === "string") {
+    try {
+      v = JSON.parse(raw) as unknown;
+    } catch {
+      v = raw;
+    }
+  }
+  if (v && typeof v === "object" && !Array.isArray(v) && Array.isArray((v as { members?: unknown }).members)) {
+    const rec = v as { members: unknown; nicks?: Record<string, string> };
+    return {
+      members: asList<Member>(rec.members),
+      nicks: rec.nicks && typeof rec.nicks === "object" ? rec.nicks : {},
+    };
+  }
+  return { members: asList<Member>(raw), nicks: {} };
+}
+
 function asList<T>(raw: unknown): T[] {
   if (Array.isArray(raw)) return raw as T[];
   if (typeof raw === "string") {
@@ -256,6 +279,7 @@ function normalizeRoom(row: Partial<Room> & { name: string }): Room {
     msgId: Number(row.msgId) || 1,
     msgTotal: Math.max(0, Number(row.msgTotal) || 0),
     expiresAt: Number((row as Room).expiresAt) || seedTtl(),
+    boundNicks: row.boundNicks && typeof row.boundNicks === "object" ? { ...row.boundNicks } : {},
   };
 }
 
@@ -264,6 +288,7 @@ function mergeRoom(key: string, incoming: Room) {
   const next = normalizeRoom(incoming);
   const cur = rooms.get(key);
   if (!cur) {
+    seedBound(next);
     rooms.set(key, next);
     collapseMembers(next);
     return next;
@@ -360,7 +385,7 @@ async function writeSql(key: string, room: Room) {
        host_id = excluded.host_id,
        expires_at = excluded.expires_at,
        updated_at = now()`,
-    [key, room.name, room.pass, JSON.stringify(room.members), JSON.stringify(room.messages), room.msgId, room.msgTotal || 0, room.hostId, room.expiresAt],
+    [key, room.name, room.pass, packMembers(room), JSON.stringify(room.messages), room.msgId, room.msgTotal || 0, room.hostId, room.expiresAt],
   );
 }
 
@@ -657,6 +682,46 @@ function json(data: unknown, status = 200) {
 
 const DEFAULT_NICKS = new Set(["ゲスト", "旅人", "Traveler"]);
 
+function seedBound(room: Room) {
+  if (!room.boundNicks) room.boundNicks = {};
+  for (const m of room.members) {
+    const n = (m.nick || "").trim();
+    if (!n || DEFAULT_NICKS.has(n)) continue;
+    if (m.id) room.boundNicks[m.id] = n;
+    if (m.token) room.boundNicks[`t:${m.token}`] = n;
+  }
+  for (const msg of room.messages) {
+    const n = (msg.nick || "").trim();
+    const id = (msg.uid || "").trim();
+    if (!id || !n || DEFAULT_NICKS.has(n) || room.boundNicks[id]) continue;
+    room.boundNicks[id] = n;
+  }
+}
+
+function keptNick(room: Room, uid: string, token: string) {
+  if (!room.boundNicks) seedBound(room);
+  if (uid && room.boundNicks?.[uid]) return room.boundNicks[uid]!;
+  if (token && room.boundNicks?.[`t:${token}`]) return room.boundNicks[`t:${token}`]!;
+  const m = room.members.find((x) => (uid && x.id === uid) || (token && x.token === token));
+  const n = (m?.nick || "").trim();
+  if (n && !DEFAULT_NICKS.has(n)) return n;
+  if (uid) {
+    for (let i = room.messages.length - 1; i >= 0; i--) {
+      const msg = room.messages[i]!;
+      if (msg.uid === uid && msg.nick && !DEFAULT_NICKS.has(msg.nick)) return msg.nick;
+    }
+  }
+  return "";
+}
+
+function bindNick(room: Room, uid: string, token: string, nick: string) {
+  const n = nick.trim();
+  if (!n || DEFAULT_NICKS.has(n)) return;
+  if (!room.boundNicks) room.boundNicks = {};
+  if (uid) room.boundNicks[uid] = n;
+  if (token) room.boundNicks[`t:${token}`] = n;
+}
+
 function wasNicks(was: string) {
   return was
     .split(/[,、|/]/)
@@ -715,6 +780,9 @@ async function kickFromOthers(uid: string, token: string, keepKey: string) {
 
 function takeSeat(room: Room, nick: string, token: string, uid: string, was = "") {
   markAway(room);
+  seedBound(room);
+  const keep = keptNick(room, uid, token);
+  if (keep && nick && hanFold(keep) !== hanFold(nick)) return "nickkeep" as const;
   const id = uid || token;
   const fold = nick ? hanFold(nick) : "";
   const old = wasNicks(was);
@@ -754,6 +822,7 @@ function takeSeat(room: Room, nick: string, token: string, uid: string, was = ""
     }
     dropOldSelf(room, have, uid, token, was);
     collapseMembers(room, have.id);
+    bindNick(room, uid || have.id, have.token, have.nick);
     return have;
   }
   if (nickTaken(room, nick)) return "nick" as const;
@@ -773,6 +842,7 @@ function takeSeat(room: Room, nick: string, token: string, uid: string, was = ""
   room.members.push(member);
   dropOldSelf(room, member, uid, token, was);
   collapseMembers(room, member.id);
+  bindNick(room, member.id, member.token, member.nick);
   return member;
 }
 
@@ -889,7 +959,7 @@ export const Route = createFileRoute("/api/party")({
           const member = takeSeat(room, nick, token, uid, was);
           if (member === "nick") return json({ ok: false, error: "nick" }, 409);
           if (member === "nickkeep") {
-            const keep = room.members.find((m) => m.id === uid || m.token === token)?.nick || "";
+            const keep = keptNick(room, uid, token) || room.members.find((m) => m.id === uid || m.token === token)?.nick || "";
             return json({ ok: false, error: "nickkeep", nick: keep }, 409);
           }
           if (!member) return json({ ok: false, error: "full" }, 409);

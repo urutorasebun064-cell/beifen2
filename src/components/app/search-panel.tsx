@@ -1299,8 +1299,11 @@ export function SearchPanel() {
 let headingWatch = false;
 const gpsHold = { lng: 0, lat: 0, acc: 9e9, t: 0, on: false, move: 0 };
 let fineTimer = 0;
+let watchId: number | null = null;
+let visBound = false;
 let streetZoom = false;
 let lastFixAt = 0;
+let gpsHdgAt = 0;
 
 export function noteStreetZoom(on: boolean) {
   streetZoom = on;
@@ -1312,35 +1315,36 @@ function blendGps(pos: GeolocationPosition) {
   if (!isInJapan(lng, lat)) return null;
   const acc = Math.max(4, pos.coords.accuracy || 40);
   const t = pos.timestamp || Date.now();
+  const reported = Number.isFinite(pos.coords.speed) ? Math.max(0, pos.coords.speed as number) : -1;
   if (!gpsHold.on) {
     gpsHold.lng = lng;
     gpsHold.lat = lat;
     gpsHold.acc = acc;
     gpsHold.t = t;
     gpsHold.on = true;
-    gpsHold.move = 0;
+    gpsHold.move = reported > 2.2 ? 10 : 0;
     return { lng, lat, acc };
   }
-  const dt = Math.max(0.25, (t - gpsHold.t) / 1000);
+  const dt = Math.max(0.2, (t - gpsHold.t) / 1000);
   const d = haversine([gpsHold.lng, gpsHold.lat], [lng, lat]) * 1000;
   const speed = d / dt;
-  if (speed > 130 && d > acc * 3) {
+  if (speed > 130 && d > acc * 3 && !(reported > 8)) {
     gpsHold.t = t;
     return { lng: gpsHold.lng, lat: gpsHold.lat, acc: gpsHold.acc };
   }
-  const rolling = speed > 3.5 || d > 35;
-  gpsHold.move = rolling ? 8 : Math.max(0, gpsHold.move - 1);
+  const rolling = reported > 2.2 || speed > 3.2 || d > 28;
+  gpsHold.move = rolling ? 10 : Math.max(0, gpsHold.move - 1);
   if (!rolling && acc > gpsHold.acc * 1.6 && acc > 22 && d < 25) {
     gpsHold.t = t;
     return { lng: gpsHold.lng, lat: gpsHold.lat, acc: gpsHold.acc };
   }
-  const dead = rolling ? 2 : Math.max(5, Math.min(acc, gpsHold.acc) * 0.4);
+  const dead = rolling ? 1.2 : Math.max(4, Math.min(acc, gpsHold.acc) * 0.35);
   if (d < dead) {
     gpsHold.acc = Math.min(gpsHold.acc, acc);
     gpsHold.t = t;
     return { lng: gpsHold.lng, lat: gpsHold.lat, acc: gpsHold.acc };
   }
-  const k = rolling ? 0.78 : acc <= 12 ? 0.5 : acc <= 22 ? 0.32 : 0.2;
+  const k = rolling ? (d > 50 ? 0.94 : 0.88) : acc <= 12 ? 0.55 : acc <= 22 ? 0.35 : 0.22;
   gpsHold.lng += (lng - gpsHold.lng) * k;
   gpsHold.lat += (lat - gpsHold.lat) * k;
   gpsHold.acc = rolling ? acc : gpsHold.acc * 0.55 + acc * 0.45;
@@ -1363,42 +1367,90 @@ function pushFix(pos: GeolocationPosition) {
   }
   lastFixAt = Date.now();
   useMapStore.getState().setUserLocation({ lng, lat }, "ok");
+  const spd = pos.coords.speed;
+  const course = pos.coords.heading;
+  if (Number.isFinite(spd) && (spd as number) > 2.8 && Number.isFinite(course) && (course as number) >= 0) {
+    gpsHdgAt = Date.now();
+    useMapStore.getState().setHeading(course as number, useMapStore.getState().headingFlat);
+  }
   return true;
 }
 
+function startWatch() {
+  if (watchId != null || typeof navigator === "undefined" || !navigator.geolocation) return;
+  watchId = navigator.geolocation.watchPosition(
+    (pos) => {
+      pushFix(pos);
+    },
+    () => {},
+    { enableHighAccuracy: true, timeout: 8000, maximumAge: 400 },
+  );
+}
+
+function stopWatch() {
+  if (watchId == null || typeof navigator === "undefined" || !navigator.geolocation) return;
+  navigator.geolocation.clearWatch(watchId);
+  watchId = null;
+}
+
+function bindWatchVis() {
+  if (visBound || typeof document === "undefined") return;
+  visBound = true;
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") startWatch();
+    else stopWatch();
+  });
+}
+
 function armFineLocate() {
+  bindWatchVis();
+  startWatch();
   if (fineTimer || typeof window === "undefined") return;
   fineTimer = window.setInterval(() => {
     if (document.visibilityState !== "visible") return;
     if (useMapStore.getState().locateStatus !== "ok") return;
     const moving = gpsHold.move > 0;
-    const wait = moving ? 5000 : streetZoom ? 12000 : 20000;
+    const wait = watchId != null ? (moving ? 8000 : streetZoom ? 16000 : 24000) : moving ? 1600 : streetZoom ? 8000 : 16000;
     if (Date.now() - lastFixAt < wait) return;
     navigator.geolocation.getCurrentPosition(
       (pos) => {
         pushFix(pos);
       },
       () => {},
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: moving ? 1500 : 6000 },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: moving ? 400 : 4000 },
     );
-  }, 4000);
+  }, 2000);
 }
 
 function startHeading() {
   if (headingWatch || typeof window === "undefined") return;
   headingWatch = true;
+  let absAt = 0;
   const apply = (e: DeviceOrientationEvent) => {
     const webkit = (e as DeviceOrientationEvent & { webkitCompassHeading?: number }).webkitCompassHeading;
+    const abs = Boolean(e.absolute) || e.type === "deviceorientationabsolute";
     let deg: number | null = null;
-    if (typeof webkit === "number" && Number.isFinite(webkit)) deg = webkit;
-    else if (typeof e.alpha === "number" && Number.isFinite(e.alpha)) deg = (360 - e.alpha) % 360;
+    if (typeof webkit === "number" && Number.isFinite(webkit)) {
+      deg = webkit;
+      absAt = Date.now();
+    } else if (abs && typeof e.alpha === "number" && Number.isFinite(e.alpha)) {
+      deg = (360 - e.alpha) % 360;
+      absAt = Date.now();
+    } else if (Date.now() - absAt > 1200 && typeof e.alpha === "number" && Number.isFinite(e.alpha)) {
+      deg = (360 - e.alpha) % 360;
+    }
     const beta = e.beta ?? 90;
     const gamma = e.gamma ?? 90;
-    const flat = Math.abs(beta) < 32 && Math.abs(gamma) < 28;
+    const flat = Math.abs(beta) < 48 && Math.abs(gamma) < 42;
+    const rideHdg = Date.now() - gpsHdgAt < 2500;
+    if (rideHdg) {
+      useMapStore.getState().setHeading(useMapStore.getState().headingDeg, flat);
+      return;
+    }
     if (deg != null) {
       if (deg < 0) deg += 360;
       useMapStore.getState().setHeading(deg, flat);
-    } else useMapStore.getState().setHeading(null, flat);
+    } else useMapStore.getState().setHeading(useMapStore.getState().headingDeg, flat);
   };
   const DOE = window.DeviceOrientationEvent as unknown as { requestPermission?: () => Promise<string> };
   const bind = () => {

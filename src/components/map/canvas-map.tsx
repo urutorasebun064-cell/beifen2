@@ -4243,7 +4243,7 @@ export function CanvasMap() {
             walk.set = true;
           } else {
             const gap = haversine([walk.lng, walk.lat], [user.lng, user.lat]) * 1000;
-            const k = gap > 40 ? 0.82 : gap > 12 ? 0.4 : camRef.current.zoom >= 14 ? 0.12 : 0.18;
+            const k = gap > 80 ? 0.94 : gap > 28 ? 0.72 : gap > 10 ? 0.42 : camRef.current.zoom >= 14 ? 0.2 : 0.26;
             walk.lng += (user.lng - walk.lng) * k;
             walk.lat += (user.lat - walk.lat) * k;
           }
@@ -4395,7 +4395,7 @@ export function CanvasMap() {
               let d = hdgT - walk.hdg;
               while (d > 180) d -= 360;
               while (d < -180) d += 360;
-              walk.hdg += d * 0.075;
+              walk.hdg += d * (Math.abs(d) > 80 ? 1 : Math.abs(d) > 35 ? 0.42 : 0.24);
             }
             if (hdgT != null) {
               const rad = (walk.hdg * Math.PI) / 180;

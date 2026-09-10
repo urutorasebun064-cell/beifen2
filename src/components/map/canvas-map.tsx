@@ -24,7 +24,7 @@ import {
 import type { Journey, LineRuntime, RouteLeg, StationHit, Train } from "@/lib/rail/types";
 import { Button } from "@/components/ui/button";
 import { applyMateTrip, calibrateTrain, calibrateStation, fillPickedStation, locateUser, noteStreetZoom } from "@/components/app/search-panel";
-import { densifyRailPath, findLineForLeg, locateStation, sliceRailPath } from "@/lib/rail/graph";
+import { findLineForLeg, locateStation, sliceRailPath } from "@/lib/rail/graph";
 import { placeTrainOnLeg, stopIndexByName } from "@/lib/rail/timetable-snap";
 import { arrivalCompare, journeyGuide, rideHeadline } from "@/components/app/route-panel";
 import { focusStay } from "@/components/app/stay-catalog";
@@ -1414,46 +1414,18 @@ function remainingJourneySegs(lines: LineRuntime[]) {
       pts = airGlowPath(leg.from.name, leg.to.name, from, to);
     } else {
       const hop = haversine([from.lng, from.lat], [to.lng, to.lat]);
-      const hours = Math.max(0.2, (leg.minutes || 0) / 60);
-      const plat = Number.parseInt(String(leg.fromPlatform ?? "").replace(/[^\d]/g, ""), 10);
       const hinted = { ...leg, from, to };
-      if (
-        /新幹|のぞみ|ひかり|こだま|みずほ|さくら|はやぶさ/.test(`${leg.lineName ?? ""} ${leg.trainType ?? ""}`) ||
-        hop / hours >= 120 ||
-        (/東京/.test(from.name) && plat >= 14 && plat <= 23)
-      ) {
-        hinted.lineName = `${leg.lineName ?? ""} 新幹線`;
+      line = findLineForLeg(lines, index, hinted);
+      pts = rideGlowPath(line, from.name, to.name);
+      if (pts.length < 2 && line) {
+        const sliced = sliceRailPath(line, from, to);
+        if (sliced.length >= 2) pts = sliced;
       }
-      const routed = densifyRailPath(from, to, lines, index, hinted);
-      line = routed.line;
-      pts = routed.path.length >= 2 ? routed.path : [];
-      if (pts.length < 2 && leg.path && leg.path.length >= 2) pts = leg.path.slice();
+      if (pts.length < 2 && leg.path && leg.path.length >= 3) pts = leg.path.slice();
       if (pts.length < 2) {
-        const prefer = preferLineName(leg.lineName ?? "");
-        const aim = realStopOf(lines, leg.to.name) ?? to;
-        const origin = realStopOf(lines, leg.from.name) ?? from;
         line = pickRideLine(lines, index, hinted, { ...from, name: leg.from.name }, { ...to, name: leg.to.name }) ?? line;
-        if (line) {
-          const sliced = sliceRailPath(line, { ...from, name: leg.from.name }, { ...to, name: leg.to.name });
-          const next = sliced.length >= 2 ? sliced : glowOnLine(line, leg.from.name, leg.to.name, aim.lng, aim.lat);
-          if (next.length >= 2) pts = next;
-        }
-        if (pts.length < 2) {
-          const named = (prefer ? lines.filter((l) => linePrefers(l, prefer)) : []).concat(
-            lines.filter((l) => stopIdx(l, leg.from.name) >= 0 || stopIdx(l, leg.to.name) >= 0),
-          );
-          const seen = new Set<string>();
-          for (const cand of named) {
-            if (seen.has(cand.id)) continue;
-            seen.add(cand.id);
-            let next = glowOnLine(cand, leg.from.name, leg.to.name, aim.lng, aim.lat);
-            if (next.length < 2) next = glowOnLine(cand, leg.to.name, leg.from.name, origin.lng, origin.lat).slice().reverse();
-            if (next.length >= 2) {
-              pts = next;
-              line = cand;
-              break;
-            }
-          }
+        if (line && stopIdx(line, from.name) >= 0 && stopIdx(line, to.name) >= 0) {
+          pts = rideGlowPath(line, from.name, to.name);
         }
       }
       if (pts.length >= 2 && hop > 2.4 && pts.length < 3) pts = [];

@@ -11,12 +11,8 @@ function ymdTokyo(at = new Date()) {
 }
 
 function yahooName(name: string, pf: string) {
-  const n = name
-    .replace(/駅$/u, "")
-    .replace(/（[^）]{0,20}）/gu, "")
-    .replace(/\([^)]{0,20}\)/gu, "")
-    .trim();
-  const p = pf.replace(/[（(][^）)]*[）)]/gu, "").trim();
+  const n = name.replace(/駅$/u, "").trim();
+  const p = pf.trim();
   return p ? `${n}(${p})` : n;
 }
 
@@ -125,16 +121,6 @@ export const Route = createFileRoute("/api/transit")({
         try {
           const diaP = fetchYahooDiaInfo();
           let first = await yahooPage(fromQ, toQ, y ?? "", mo ?? "", d ?? "", hh, mm, type, origin, dest);
-          if (!first.length && (opf || dpf)) {
-            first = await yahooPage(from.replace(/駅$/u, "").trim(), to.replace(/駅$/u, "").trim(), y ?? "", mo ?? "", d ?? "", hh, mm, type, origin, dest);
-          }
-          if (!first.length) {
-            const altFrom = fromQ.replace(/[（(][^）)]*[）)]/gu, "").trim();
-            const altTo = toQ.replace(/[（(][^）)]*[）)]/gu, "").trim();
-            if (altFrom !== fromQ || altTo !== toQ) {
-              first = await yahooPage(altFrom, altTo, y ?? "", mo ?? "", d ?? "", hh, mm, type, origin, dest);
-            }
-          }
           if (type === "1" && first.length) {
             const last = parseHhmm(first[first.length - 1]?.departHhmm);
             if (last) {

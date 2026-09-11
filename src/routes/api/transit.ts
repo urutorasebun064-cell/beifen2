@@ -227,7 +227,7 @@ export const Route = createFileRoute("/api/transit")({
             }
           }
           const dia = await diaP.catch(() => []);
-          const journeys = first.map((j) => stampYahooDia(j, dia));
+          const journeys = first.slice(0, 3).map((j) => stampYahooDia(j, dia));
           if (journeys.length) cache.set(cacheId, { at: Date.now(), journey: journeys[0], journeys });
           return Response.json({ ok: true, journey: journeys[0] ?? null, journeys });
         } catch {

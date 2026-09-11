@@ -465,8 +465,9 @@ export function RoutePanel({ journey }: { journey: Journey }) {
   const journeys = useMapStore((s) => s.journeys);
   const journeyIndex = useMapStore((s) => s.journeyIndex);
   const liveTrains = useMapStore((s) => s.liveTrains);
-  const nowMin = tokyoParts(simNow()).minutes;
-  const upcoming = (journeys.length ? journeys : [journey]).filter((j) => untilHhmm(j.departHhmm, nowMin, 0) >= 0);
+  const clock = tokyoParts(simNow());
+  const nowMin = clock.hour * 60 + clock.minute;
+  const upcoming = (journeys.length ? journeys : [journey]).filter((j) => untilHhmm(j.departHhmm, nowMin, 0) >= -1);
   const list = upcoming.length ? upcoming : journeys.length ? journeys : [journey];
 
   return (

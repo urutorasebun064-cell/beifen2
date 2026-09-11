@@ -1056,15 +1056,16 @@ export function PartyWindow() {
               >
                 <ChevronDown className="size-4" />
               </button>
-            ) : null}
-            <button
-              type="button"
-              className="rounded-full p-1 text-fg-muted"
-              onClick={joined ? leave : hide}
-              aria-label={t.close}
-            >
-              <X className="size-4" />
-            </button>
+            ) : (
+              <button
+                type="button"
+                className="rounded-full p-1 text-fg-muted"
+                onClick={hide}
+                aria-label={t.close}
+              >
+                <X className="size-4" />
+              </button>
+            )}
           </div>
         </div>
 
@@ -1154,6 +1155,13 @@ export function PartyWindow() {
                 disabled={sharing}
               >
                 {sharing ? t.partySharing : sharingMe ? t.partyUnshare : t.partyShare}
+              </button>
+              <button
+                type="button"
+                className="inline-flex min-h-10 w-full items-center justify-center rounded-[var(--radius-sm)] bg-fg/8 px-3 text-xs font-medium text-fg"
+                onClick={leave}
+              >
+                {t.partyLeave}
               </button>
               {err ? <p className="text-xs text-fg">{err}</p> : null}
               {isHost ? (

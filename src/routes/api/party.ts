@@ -600,11 +600,23 @@ function collapseMembers(room: Room, keepId?: string) {
       m.token = m.token || prev.token;
       m.nick = keepId && prev.id === keepId && prev.nick ? prev.nick : m.nick || prev.nick;
       m.push = m.push || prev.push;
+      if (!Number.isFinite(m.lng) && Number.isFinite(prev.lng)) {
+        m.lng = prev.lng;
+        m.lat = prev.lat;
+        m.near = m.near || prev.near;
+        m.pinAt = Math.max(Number(m.pinAt) || 0, Number(prev.pinAt) || 0);
+      }
       byId.set(key, m);
     } else {
       prev.token = prev.token || m.token;
       prev.nick = keepId && m.id === keepId && m.nick ? m.nick : prev.nick || m.nick;
       prev.push = prev.push || m.push;
+      if (!Number.isFinite(prev.lng) && Number.isFinite(m.lng)) {
+        prev.lng = m.lng;
+        prev.lat = m.lat;
+        prev.near = prev.near || m.near;
+        prev.pinAt = Math.max(Number(prev.pinAt) || 0, Number(m.pinAt) || 0);
+      }
     }
   };
   for (const m of room.members) {
@@ -626,10 +638,22 @@ function collapseMembers(room: Room, keepId?: string) {
       if (prev.id === room.hostId) room.hostId = m.id;
       m.token = m.token || prev.token;
       m.push = m.push || prev.push;
+      if (!Number.isFinite(m.lng) && Number.isFinite(prev.lng)) {
+        m.lng = prev.lng;
+        m.lat = prev.lat;
+        m.near = m.near || prev.near;
+        m.pinAt = Math.max(Number(m.pinAt) || 0, Number(prev.pinAt) || 0);
+      }
       byTok.set(tok, m);
     } else {
       prev.token = prev.token || m.token;
       prev.push = prev.push || m.push;
+      if (!Number.isFinite(prev.lng) && Number.isFinite(m.lng)) {
+        prev.lng = m.lng;
+        prev.lat = m.lat;
+        prev.near = prev.near || m.near;
+        prev.pinAt = Math.max(Number(prev.pinAt) || 0, Number(m.pinAt) || 0);
+      }
     }
   }
   room.members = [...byTok.values()];

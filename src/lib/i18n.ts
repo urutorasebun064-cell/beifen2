@@ -340,7 +340,7 @@ export const copies = {
     partyMembers: "现在在房间里的人",
     partyNick: "昵称",
     partyGo: "进入",
-    partyLeave: "离开",
+    partyLeave: "退房",
     partyFull: "小队已满（5人）",
     partyBadPass: "口令不对",
     partyMissing: "没有这个房间",

@@ -24,7 +24,7 @@ import {
 import type { Journey, LineRuntime, RouteLeg, StationHit, Train } from "@/lib/rail/types";
 import { Button } from "@/components/ui/button";
 import { applyMateTrip, calibrateTrain, calibrateStation, fillPickedStation, locateUser, noteStreetZoom } from "@/components/app/search-panel";
-import { findLineForLeg, densifyRailPath, locateStation, pathForRide, sliceRailPath } from "@/lib/rail/graph";
+import { chainRailPath, densifyRailPath, findLineForLeg, locateStation, pathForRide, sliceRailPath } from "@/lib/rail/graph";
 import { placeTrainOnLeg, stopIndexByName } from "@/lib/rail/timetable-snap";
 import { arrivalCompare, journeyGuide, rideHeadline } from "@/components/app/route-panel";
 import { focusStay } from "@/components/app/stay-catalog";
@@ -1159,6 +1159,34 @@ function stopKey(name: string) {
     .trim();
 }
 
+function pinNamedStop(
+  name: string,
+  lines: LineRuntime[],
+  index: ReturnType<typeof useMapStore.getState>["stationIndex"],
+  fallback: { lng: number; lat: number; prefecture?: string },
+) {
+  const want = stopKey(name);
+  let best: { name: string; lng: number; lat: number; prefecture?: string } | null = null;
+  let bestD = Infinity;
+  const hinted = Number.isFinite(fallback.lng) && fallback.lng > 122 && fallback.lng < 154;
+  for (const hit of index.values()) {
+    if (stopKey(hit.name) !== want && hit.name !== name) continue;
+    const d = hinted ? Math.hypot(hit.lng - fallback.lng, hit.lat - fallback.lat) : 0;
+    if (d < bestD) {
+      bestD = d;
+      best = { name: hit.name, lng: hit.lng, lat: hit.lat, prefecture: hit.prefecture };
+    }
+  }
+  if (best) return best;
+  for (const line of lines) {
+    const i = stopIdx(line, name);
+    if (i < 0) continue;
+    const s = line.stops[i]!;
+    return { name: s.n, lng: s.lng, lat: s.lat, prefecture: s.pf };
+  }
+  return { name, lng: fallback.lng, lat: fallback.lat, prefecture: fallback.prefecture };
+}
+
 function stopIdx(line: LineRuntime, name: string) {
   const n = stopKey(name);
   if (!n) return -1;
@@ -1348,7 +1376,7 @@ function remainingJourneySegs(lines: LineRuntime[]) {
   const index = store.stationIndex;
   const here = store.userLocation;
   const key = journey
-    ? `j3:${journey.origin.name}|${journey.dest.name}|${journey.departHhmm}|${journey.arriveHhmm}|${journey.legs.map((l) => `${l.kind}:${l.from.name}>${l.to.name}`).join(",")}|${store.stayWalk ? 1 : 0}|${store.mateWalk ? 1 : 0}|${train?.id ?? ""}|${here ? here.lng.toFixed(2) : ""}|${here ? here.lat.toFixed(2) : ""}|${lines.length}`
+    ? `j4:${journey.origin.name}|${journey.dest.name}|${journey.departHhmm}|${journey.arriveHhmm}|${journey.legs.map((l) => `${l.kind}:${l.from.name}>${l.to.name}`).join(",")}|${store.stayWalk ? 1 : 0}|${store.mateWalk ? 1 : 0}|${train?.id ?? ""}|${here ? here.lng.toFixed(2) : ""}|${here ? here.lat.toFixed(2) : ""}|${lines.length}`
     : train && train.kind !== "flight"
       ? `t:${train.id}|${train.dest}|${lines.length}`
       : "";
@@ -1406,10 +1434,8 @@ function remainingJourneySegs(lines: LineRuntime[]) {
       });
       continue;
     }
-    const from = locateStation(leg.from.name, lines, index, leg.from);
-    const to = locateStation(leg.to.name, lines, index, leg.to);
-    const fromPt = { ...from, name: leg.from.name || from.name };
-    const toPt = { ...to, name: leg.to.name || to.name };
+    const fromPt = pinNamedStop(leg.from.name, lines, index, leg.from);
+    const toPt = pinNamedStop(leg.to.name, lines, index, leg.to);
     let line: LineRuntime | null = null;
     let pts: [number, number][] = [];
     if (isAirLeg(leg)) {
@@ -1423,17 +1449,24 @@ function remainingJourneySegs(lines: LineRuntime[]) {
         const sliced = sliceRailPath(line, fromPt, toPt);
         if (sliced.length >= 2) pts = sliced;
       }
-      if ((pts.length < 2 || (hop > 2.4 && pts.length < 3)) && leg.path && leg.path.length >= 3) pts = leg.path.slice();
-      if (pts.length < 2 || (hop > 2.4 && pts.length < 3)) {
+      if (pts.length < 3) {
+        const along = chainRailPath(fromPt.name, toPt.name, lines, leg.lineName ?? "");
+        if (along.length >= 3) pts = along;
+      }
+      if ((pts.length < 3) && leg.path && leg.path.length >= 3) pts = leg.path.slice();
+      if (pts.length < 3) {
         const dense = densifyRailPath(fromPt, toPt, lines, index, hinted);
-        if (dense.path.length >= 2 && !(hop > 2.4 && dense.path.length < 3)) {
+        if (dense.path.length >= 3) {
           pts = dense.path;
           if (dense.line) line = dense.line;
         }
       }
-      if (pts.length < 2 || (hop > 2.4 && pts.length < 3)) {
+      if (pts.length < 3) {
         const routed = pathForRide(fromPt, toPt, lines, index, hinted);
-        if (routed.path.length >= 2 && !(hop > 2.4 && routed.path.length < 3)) {
+        if (routed.path.length >= 3) {
+          pts = routed.path;
+          if (routed.line) line = routed.line;
+        } else if (pts.length < 2 && routed.path.length >= 2) {
           pts = routed.path;
           if (routed.line) line = routed.line;
         }
@@ -1442,6 +1475,12 @@ function remainingJourneySegs(lines: LineRuntime[]) {
         const a = airportOf(leg.from.name);
         const b = airportOf(leg.to.name);
         if (a && b && a.id !== b.id) pts = airGlowPath(leg.from.name, leg.to.name, fromPt, toPt);
+      }
+      if (pts.length < 2 && hop >= 0.05) {
+        pts = [
+          [fromPt.lng, fromPt.lat],
+          [toPt.lng, toPt.lat],
+        ];
       }
     }
     if (pts.length < 2) continue;
@@ -3448,7 +3487,7 @@ export function CanvasMap() {
       if (cam.zoom >= 8.6 && !useMapStore.getState().radarEnabled && !useMapStore.getState().mountainLayer) {
         const selTrain = useMapStore.getState().selectedTrain;
         const selStation = useMapStore.getState().selectedStation;
-        const tripHot = useMapStore.getState().journey;
+        const tripHot = useMapStore.getState().hideGuide ? null : useMapStore.getState().journey;
         const hot = tripHot
           ? journeyAnchorNames(tripHot)
           : new Set([selTrain?.nextStop, selTrain?.prevStop, selStation?.name].filter(Boolean) as string[]);
@@ -4153,7 +4192,7 @@ export function CanvasMap() {
           const cam = camRef.current;
           const selTrain = useMapStore.getState().selectedTrain;
           const selStation = useMapStore.getState().selectedStation;
-          const tripHot = useMapStore.getState().journey;
+          const tripHot = useMapStore.getState().hideGuide ? null : useMapStore.getState().journey;
           const hot = tripHot
             ? journeyAnchorNames(tripHot)
             : new Set([selTrain?.nextStop, selTrain?.prevStop, selStation?.name].filter(Boolean) as string[]);
@@ -4233,7 +4272,7 @@ export function CanvasMap() {
 
         drawJourneyPulse(ctx, camRef.current, w, h, ts, lineRef.current, "ride");
 
-        if (trainCards.length) {
+        if (trainCards.length && !useMapStore.getState().followTrainId && !useMapStore.getState().hideGuide) {
           const loc = useMapStore.getState().lang;
           const txt = copies[loc];
           const journey = useMapStore.getState().journey;
@@ -4953,10 +4992,10 @@ export function CanvasMap() {
     let pickTimer = 0;
 
     const zoomToScreen = (sx: number, sy: number) => {
+      if (useMapStore.getState().followTrainId) return;
       const { w, h } = sizeRef.current;
       const src = camRef.current;
       const nextZoom = Math.min(MAX_ZOOM, src.zoom + ZOOM_STEP);
-      useMapStore.getState().setFollowTrainId(null);
       const dest = zoomCenterOn(src, sx, sy, w, h, nextZoom);
       camLerpRef.current = beginLerp(src, dest, 480);
     };
@@ -5186,16 +5225,16 @@ export function CanvasMap() {
   const clock = useMapStore((s) => s.clock);
 
   const bumpYaw = (dir: 1 | -1) => {
-    useMapStore.getState().setFollowTrainId(null);
+    if (useMapStore.getState().followTrainId) return;
     camLerpRef.current = null;
     const cam = camRef.current;
     camRef.current = { ...cam, yaw: cam.yaw + dir * 0.16 };
     wakeRef.current();
   };
   const goSelf = () => {
+    if (useMapStore.getState().followTrainId) return;
     const { w, h } = sizeRef.current;
     const store = useMapStore.getState();
-    store.setFollowTrainId(null);
     store.selectTrain(null);
     store.selectStation(null);
     introDoneRef.current = true;
@@ -5217,7 +5256,7 @@ export function CanvasMap() {
     wakeRef.current();
   };
   const applyZoom = (raw: number) => {
-    useMapStore.getState().setFollowTrainId(null);
+    if (useMapStore.getState().followTrainId) return;
     camLerpRef.current = null;
     const z = clampZoom(raw);
     const { w, h } = sizeRef.current;
@@ -5227,7 +5266,7 @@ export function CanvasMap() {
     wakeRef.current();
   };
   const applyTilt = (raw: number) => {
-    useMapStore.getState().setFollowTrainId(null);
+    if (useMapStore.getState().followTrainId) return;
     camLerpRef.current = null;
     const v = clampTilt(raw);
     camRef.current.tilt = v;

@@ -37,6 +37,7 @@ type MapStore = {
   selectTrain: (train: Train | null) => void;
   followTrainId: string | null;
   setFollowTrainId: (id: string | null) => void;
+  hideGuide: boolean;
   watchTrain: (train: Train) => void;
   query: string;
   setQuery: (q: string) => void;
@@ -198,10 +199,12 @@ export const useMapStore = create<MapStore>((set, get) => ({
   selectTrain: (selectedTrain) =>
     set((s) => ({
       selectedTrain,
-      followTrainId: selectedTrain && s.followTrainId === selectedTrain.id ? s.followTrainId : null,
+      followTrainId: selectedTrain && s.followTrainId ? selectedTrain.id : selectedTrain ? s.followTrainId : null,
+      hideGuide: selectedTrain ? s.hideGuide : false,
     })),
   followTrainId: null,
-  setFollowTrainId: (followTrainId) => set({ followTrainId }),
+  hideGuide: false,
+  setFollowTrainId: (followTrainId) => set({ followTrainId, hideGuide: Boolean(followTrainId) }),
   watchTrain: (train) => set({ selectedTrain: train, followTrainId: train.id, sheetOpen: true }),
   query: "",
   setQuery: (query) => set({ query }),

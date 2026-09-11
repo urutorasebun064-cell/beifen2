@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { ChevronDown, ChevronUp, TrainFront, X } from "lucide-react";
+import { ChevronDown, ChevronUp, X } from "lucide-react";
 import { JapanMap } from "@/components/map/japan-map";
 import { SearchPanel, locateUser, startTransitRefresh, mergeCalibratedLive } from "@/components/app/search-panel";
 import { StayBar, StayBubble, StayCatalog, StayChat } from "@/components/app/stay-catalog";
@@ -39,10 +39,10 @@ export function AppShell() {
   const selectedKonbini = useMapStore((s) => s.selectedKonbini);
   const selectedPeak = useMapStore((s) => s.selectedPeak);
   const selectedTrain = useMapStore((s) => s.selectedTrain);
+  const hideGuide = useMapStore((s) => s.hideGuide);
   const followTrainId = useMapStore((s) => s.followTrainId);
   const odptKey = useMapStore((s) => s.odptKey);
   const night = isNightService(tokyoParts(simNow()).minutes);
-  const following = Boolean(followTrainId);
   const onRide = Boolean((selectedTrain || journey) && !sheetOpen && !selectedStay && !selectedKonbini);
 
   useEffect(() => {
@@ -376,28 +376,14 @@ export function AppShell() {
       </aside>
       )}
 
-      {following ? (
-        <div className="pointer-events-auto absolute inset-0 z-50">
-          <div className="absolute inset-x-0 bottom-0 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
-            <div className="mx-auto w-full max-w-md">
-              <Button
-                variant="solid"
-                className="h-12 w-full"
-                onClick={() => useMapStore.getState().setFollowTrainId(null)}
-              >
-                <TrainFront />
-                {t.unfollow}
-              </Button>
-            </div>
-          </div>
-        </div>
-      ) : onRide ? (
-        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+      {onRide ? (
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-50 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
           <div className="pointer-events-auto mx-auto w-full max-w-md">
             <FollowCard />
           </div>
         </div>
       ) : null}
+      {hideGuide || followTrainId ? <div className="pointer-events-auto absolute inset-0 z-10" /> : null}
 
       <PartySafe />
     </div>

@@ -32,6 +32,8 @@ export function focusKonbini(store: KonbiniStore) {
   s.selectStation(null);
   s.selectStay(null);
   s.selectKonbini(store);
+  s.setKonbiniChat(true);
+  s.setShopChatCollapsed(false);
   s.requestFlyTo({ lng: store.lng, lat: store.lat, zoom: 16.2, bearing: 0, pitch: 0.55 });
 }
 
@@ -128,17 +130,26 @@ export function ShopChat({
   const [people, setPeople] = useState<ChatPerson[]>([]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+  const meId = shopUid();
   const nickRef = useRef(nick);
   nickRef.current = nick;
   const inside = insideKonbiniFence({ lng, lat }, loc);
+  const logRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     setNick(shopNickOf(storeId));
     setErr("");
+    setRows([]);
+    setPeople([]);
   }, [storeId]);
 
   const apply = (data: { messages?: ChatMsg[]; members?: ChatPerson[] }) => {
-    if (Array.isArray(data.messages)) setRows(data.messages.slice(-30));
+    if (Array.isArray(data.messages)) {
+      setRows((prev) => {
+        const next = data.messages!.slice(-30);
+        return next.length >= prev.length ? next : prev;
+      });
+    }
     if (Array.isArray(data.members)) setPeople(data.members);
   };
 
@@ -152,7 +163,7 @@ export function ShopChat({
         store: storeId,
         nick: nickRef.current.trim().slice(0, 16),
         text: body,
-        uid: shopUid(),
+        uid: meId,
         lng: here?.lng,
         lat: here?.lat,
         storeLng: lng,
@@ -166,13 +177,17 @@ export function ShopChat({
     let live = true;
     const tick = async () => {
       try {
-        if (gpsOk && inside) {
+        const s = useMapStore.getState();
+        const here = s.userLocation;
+        const gps = s.locateStatus === "ok";
+        const inFence = insideKonbiniFence({ lng, lat }, here);
+        if (gps && inFence) {
           const res = await post("beat");
-          const data = (await res.json()) as { messages?: ChatMsg[]; members?: ChatPerson[]; error?: string };
+          const data = (await res.json()) as { messages?: ChatMsg[]; members?: ChatPerson[]; error?: string; nick?: string };
           if (!live) return;
           if (res.status === 409) {
             if (data.error === "nickkeep") {
-              const keep = String((data as { nick?: string }).nick || shopNickOf(storeId) || "").trim();
+              const keep = String(data.nick || shopNickOf(storeId) || "").trim();
               if (keep) {
                 setNick(keep);
                 nickRef.current = keep;
@@ -207,9 +222,20 @@ export function ShopChat({
     return () => {
       live = false;
       window.clearInterval(id);
+    };
+  }, [open, storeId, lng, lat, t.konbiniNickKeep, t.konbiniNickTaken]);
+
+  useEffect(() => {
+    if (!open || !storeId) return;
+    return () => {
       void post("leave");
     };
-  }, [open, storeId, gpsOk, inside, lng, lat]);
+  }, [open, storeId]);
+
+  useEffect(() => {
+    const el = logRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [rows, open]);
 
   if (!open || collapsed) return null;
   const send = async (e: FormEvent) => {
@@ -232,16 +258,23 @@ export function ShopChat({
     }
     setBusy(true);
     setErr("");
+    nickRef.current = name;
+    const pending: ChatMsg = { id: Date.now(), nick: name, body, created_at: new Date().toISOString(), uid: meId };
+    setRows((prev) => [...prev, pending].slice(-30));
+    setText("");
+    setPeople((prev) => (prev.some((p) => p.id === meId) ? prev : [...prev, { id: meId, nick: name }]));
     try {
       const res = await post("send", body);
-      const data = (await res.json()) as { messages?: ChatMsg[]; members?: ChatPerson[]; error?: string };
+      const data = (await res.json()) as { messages?: ChatMsg[]; members?: ChatPerson[]; error?: string; nick?: string };
       if (res.status === 403) {
+        setRows((prev) => prev.filter((m) => m.id !== pending.id));
         setErr(t.konbiniTooFar.replace("{m}", String(KONBINI_CHAT_M)));
         return;
       }
       if (res.status === 409) {
+        setRows((prev) => prev.filter((m) => m.id !== pending.id));
         if (data.error === "nickkeep") {
-          const keep = String((data as { nick?: string }).nick || shopNickOf(storeId) || "").trim();
+          const keep = String(data.nick || shopNickOf(storeId) || "").trim();
           if (keep) {
             setNick(keep);
             nickRef.current = keep;
@@ -254,11 +287,11 @@ export function ShopChat({
         return;
       }
       if (!res.ok) {
+        setRows((prev) => prev.filter((m) => m.id !== pending.id));
         setErr(t.reserveFail);
         return;
       }
-      setText("");
-      rememberShopNick(storeId, nick);
+      rememberShopNick(storeId, name);
       apply(data);
     } finally {
       setBusy(false);
@@ -288,13 +321,13 @@ export function ShopChat({
         {people.length ? (
           <p className="truncate px-3 pb-1 text-[11px] text-fg">{people.map((p) => p.nick).join(" · ")}</p>
         ) : null}
-        <div className="flex min-h-40 flex-1 flex-col gap-2 overflow-y-auto px-3 py-2">
+        <div ref={logRef} className="flex min-h-40 flex-1 flex-col gap-2 overflow-y-auto px-3 py-2">
           {rows.length ? (
             rows.map((row) => {
-              const mine = row.uid ? row.uid === shopUid() : row.nick === nick;
+              const mine = row.uid ? row.uid === meId : row.nick === nick;
               return (
-                <div key={row.id} className={`flex ${mine ? "justify-end" : "justify-start"}`}>
-                  <div className={`max-w-[80%] rounded-[var(--radius-md)] px-3 py-2 ${mine ? "bg-accent/15" : "bg-fg/5"}`}>
+                <div key={`${row.id}-${row.created_at}`} className={`flex ${mine ? "justify-end" : "justify-start"}`}>
+                  <div className={`max-w-[80%] rounded-[var(--radius-sm)] px-3 py-2 ${mine ? "bg-accent/15" : "bg-fg/5"}`}>
                     <p className={`text-[10px] font-medium text-fg-muted ${mine ? "text-right" : "text-left"}`}>{row.nick}</p>
                     <p className="text-sm text-fg">{row.body}</p>
                   </div>

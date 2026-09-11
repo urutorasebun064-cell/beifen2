@@ -24,7 +24,7 @@ import {
 import type { Journey, LineRuntime, RouteLeg, StationHit, Train } from "@/lib/rail/types";
 import { Button } from "@/components/ui/button";
 import { applyMateTrip, calibrateTrain, calibrateStation, fillPickedStation, locateUser, noteStreetZoom } from "@/components/app/search-panel";
-import { findLineForLeg, locateStation, pathForRide, sliceRailPath } from "@/lib/rail/graph";
+import { findLineForLeg, densifyRailPath, locateStation, pathForRide, sliceRailPath } from "@/lib/rail/graph";
 import { placeTrainOnLeg, stopIndexByName } from "@/lib/rail/timetable-snap";
 import { arrivalCompare, journeyGuide, rideHeadline } from "@/components/app/route-panel";
 import { focusStay } from "@/components/app/stay-catalog";
@@ -1348,7 +1348,7 @@ function remainingJourneySegs(lines: LineRuntime[]) {
   const index = store.stationIndex;
   const here = store.userLocation;
   const key = journey
-    ? `j:${journey.origin.name}|${journey.dest.name}|${journey.departHhmm}|${journey.arriveHhmm}|${journey.legs.map((l) => `${l.kind}:${l.from.name}>${l.to.name}`).join(",")}|${store.stayWalk ? 1 : 0}|${store.mateWalk ? 1 : 0}|${train?.id ?? ""}|${here ? here.lng.toFixed(2) : ""}|${here ? here.lat.toFixed(2) : ""}|${lines.length}`
+    ? `j3:${journey.origin.name}|${journey.dest.name}|${journey.departHhmm}|${journey.arriveHhmm}|${journey.legs.map((l) => `${l.kind}:${l.from.name}>${l.to.name}`).join(",")}|${store.stayWalk ? 1 : 0}|${store.mateWalk ? 1 : 0}|${train?.id ?? ""}|${here ? here.lng.toFixed(2) : ""}|${here ? here.lat.toFixed(2) : ""}|${lines.length}`
     : train && train.kind !== "flight"
       ? `t:${train.id}|${train.dest}|${lines.length}`
       : "";
@@ -1408,43 +1408,44 @@ function remainingJourneySegs(lines: LineRuntime[]) {
     }
     const from = locateStation(leg.from.name, lines, index, leg.from);
     const to = locateStation(leg.to.name, lines, index, leg.to);
+    const fromPt = { ...from, name: leg.from.name || from.name };
+    const toPt = { ...to, name: leg.to.name || to.name };
     let line: LineRuntime | null = null;
     let pts: [number, number][] = [];
-    let clip = false;
     if (isAirLeg(leg)) {
-      pts = airGlowPath(leg.from.name, leg.to.name, from, to);
+      pts = airGlowPath(leg.from.name, leg.to.name, fromPt, toPt);
     } else {
-      const hop = haversine([from.lng, from.lat], [to.lng, to.lat]);
-      const hinted = { ...leg, from, to };
+      const hop = haversine([fromPt.lng, fromPt.lat], [toPt.lng, toPt.lat]);
+      const hinted = { ...leg, from: fromPt, to: toPt };
       line = findLineForLeg(lines, index, hinted);
-      pts = rideGlowPath(line, from.name, to.name);
+      pts = rideGlowPath(line, fromPt.name, toPt.name);
       if (pts.length < 2 && line) {
-        const sliced = sliceRailPath(line, from, to);
+        const sliced = sliceRailPath(line, fromPt, toPt);
         if (sliced.length >= 2) pts = sliced;
       }
-      if (pts.length < 2 && leg.path && leg.path.length >= 3) pts = leg.path.slice();
-      if (pts.length < 2) {
-        line = pickRideLine(lines, index, hinted, { ...from, name: leg.from.name }, { ...to, name: leg.to.name }) ?? line;
-        if (line) pts = rideGlowPath(line, from.name, to.name);
+      if ((pts.length < 2 || (hop > 2.4 && pts.length < 3)) && leg.path && leg.path.length >= 3) pts = leg.path.slice();
+      if (pts.length < 2 || (hop > 2.4 && pts.length < 3)) {
+        const dense = densifyRailPath(fromPt, toPt, lines, index, hinted);
+        if (dense.path.length >= 2 && !(hop > 2.4 && dense.path.length < 3)) {
+          pts = dense.path;
+          if (dense.line) line = dense.line;
+        }
       }
       if (pts.length < 2 || (hop > 2.4 && pts.length < 3)) {
-        const routed = pathForRide(from, to, lines, index, hinted);
-        if (routed.path.length >= 3 || (routed.path.length >= 2 && hop <= 2.4)) {
+        const routed = pathForRide(fromPt, toPt, lines, index, hinted);
+        if (routed.path.length >= 2 && !(hop > 2.4 && routed.path.length < 3)) {
           pts = routed.path;
           if (routed.line) line = routed.line;
         }
       }
-      if (pts.length < 2 && line) pts = glowOnLine(line, from.name, to.name, to.lng, to.lat);
-      if (pts.length >= 2 && hop > 2.4 && pts.length < 3) pts = [];
-      if (pts.length < 2) {
+      if (pts.length < 2 && hop > 80) {
         const a = airportOf(leg.from.name);
         const b = airportOf(leg.to.name);
-        if (a && b && a.id !== b.id && hop > 80) pts = airGlowPath(leg.from.name, leg.to.name, from, to);
+        if (a && b && a.id !== b.id) pts = airGlowPath(leg.from.name, leg.to.name, fromPt, toPt);
       }
-      clip = Boolean(pts.length >= 2 && train && train.kind !== "flight" && line && lineMatchesLeg(train, leg) && sameWay(train, leg, lines));
     }
     if (pts.length < 2) continue;
-    segs.push({ color: line?.color || leg.color || CREAM, pts: slimPath(pts), walk: false, clip });
+    segs.push({ color: line?.color || leg.color || CREAM, pts: slimPath(pts), walk: false, clip: false });
   }
   segsCache = { key, segs };
   return segs;
@@ -4614,12 +4615,13 @@ export function CanvasMap() {
     let mapGesture = false;
 
     const breakAuto = () => {
+      if (useMapStore.getState().followTrainId) return;
       camLerpRef.current = null;
       introDoneRef.current = true;
-      if (useMapStore.getState().followTrainId) useMapStore.getState().setFollowTrainId(null);
     };
 
     const pick = (sx: number, sy: number) => {
+      if (useMapStore.getState().followTrainId) return;
       const cam = camRef.current;
       const { w, h } = sizeRef.current;
       const picking = useMapStore.getState().pickField;

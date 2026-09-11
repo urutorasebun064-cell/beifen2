@@ -52,11 +52,40 @@ function bumpMinute(hh: number, mm: number, add = 1) {
     m -= 60;
     h += 1;
   }
+  while (m < 0) {
+    m += 60;
+    h -= 1;
+  }
   return { hh: h, mm: m };
 }
 
 function jid(j: Journey) {
   return `${j.departHhmm}|${j.arriveHhmm}|${j.legs.map((l) => l.lineName ?? l.kind).join(",")}`;
+}
+
+function depMin(j: Journey) {
+  const p = parseHhmm(j.departHhmm);
+  if (!p) return 0;
+  return (p.hh % 24) * 60 + p.mm;
+}
+
+function addJourneys(into: Journey[], rows: Journey[]) {
+  const seen = new Set(into.map(jid));
+  for (const j of rows) {
+    if (!j?.legs?.length) continue;
+    const id = jid(j);
+    if (seen.has(id)) continue;
+    seen.add(id);
+    into.push(j);
+  }
+}
+
+function sortByDepart(list: Journey[]) {
+  list.sort((a, b) => {
+    const d = depMin(a) - depMin(b);
+    if (d) return d;
+    return a.totalMinutes - b.totalMinutes;
+  });
 }
 
 type St = { name?: string; code?: string; label?: string; value?: string };
@@ -73,6 +102,7 @@ async function yahooPage(
   origin: RouteStop,
   dest: RouteStop,
   extra?: { flatlon?: string; tlatlon?: string },
+  ws = "3",
 ): Promise<{ journeys: Journey[]; fromList: St[]; toList: St[] }> {
   const qs = new URLSearchParams({
     from,
@@ -86,7 +116,7 @@ async function yahooPage(
     type,
     ticket: "ic",
     expkind: "1",
-    ws: "3",
+    ws,
     s: "0",
     al: "1",
     shin: "1",
@@ -211,20 +241,48 @@ export const Route = createFileRoute("/api/transit")({
             }
           }
           if (type === "1" && first.length) {
+            const pullAt = async (h: number, m: number, ws = "3") => {
+              const page = await yahooPage(usedFrom, usedTo, y ?? "", mo ?? "", d ?? "", h, m, "1", origin, dest, undefined, ws);
+              addJourneys(first, page.journeys);
+            };
+            await pullAt(hh, mm, "1");
+            sortByDepart(first);
+            const qmin = (hh % 24) * 60 + mm;
+            let earliest = depMin(first[0]!);
+            if (earliest < qmin - 60) earliest += 1440;
+            let t = qmin + 5;
+            let extra = 0;
+            while (t < earliest && extra < 3) {
+              await pullAt(Math.floor(t / 60) % 24, t % 60);
+              extra += 1;
+              t += 5;
+              sortByDepart(first);
+              earliest = depMin(first[0]!);
+              if (earliest < qmin - 60) earliest += 1440;
+            }
+            sortByDepart(first);
+            for (let i = 0; i < first.length - 1 && extra < 5; i++) {
+              const a = depMin(first[i]!);
+              const b = depMin(first[i + 1]!);
+              let gap = b - a;
+              if (gap < 0) gap += 1440;
+              if (gap < 8) continue;
+              const n = bumpMinute(Math.floor(a / 60), a % 60, 1);
+              const before = first.length;
+              await pullAt(n.hh, n.mm);
+              extra += 1;
+              if (first.length > before) {
+                sortByDepart(first);
+                i = -1;
+              }
+            }
+            sortByDepart(first);
             const last = parseHhmm(first[first.length - 1]?.departHhmm);
             if (last) {
               const n = bumpMinute(last.hh, last.mm, 1);
-              const extra = await yahooPage(usedFrom, usedTo, y ?? "", mo ?? "", d ?? "", n.hh, n.mm, "1", origin, dest);
-              if (extra.journeys.length) {
-                const seen = new Set(first.map(jid));
-                for (const j of extra.journeys) {
-                  const id = jid(j);
-                  if (seen.has(id)) continue;
-                  seen.add(id);
-                  first.push(j);
-                }
-              }
+              await pullAt(n.hh, n.mm);
             }
+            sortByDepart(first);
           }
           const dia = await diaP.catch(() => []);
           const journeys = first.map((j) => stampYahooDia(j, dia));

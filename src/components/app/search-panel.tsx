@@ -389,6 +389,12 @@ export async function applyTrip(origin: StationHit | { lng: number; lat: number 
     const store = useMapStore.getState();
     let live: Journey[] = journeys.filter(stillDue);
     if (!live.length) live = journeys.slice();
+    live.sort((a, b) => {
+      const da = departDue(a.departHhmm, nowMin) + Math.max(0, a.delayMin ?? 0);
+      const db = departDue(b.departHhmm, nowMin) + Math.max(0, b.delayMin ?? 0);
+      if (da !== db) return da - db;
+      return a.totalMinutes - b.totalMinutes;
+    });
     if (!live.length) {
       store.setJourneys([]);
       if (!silent) store.setSearching(false);

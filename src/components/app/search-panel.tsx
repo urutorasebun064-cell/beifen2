@@ -168,10 +168,30 @@ function departDue(hhmm: string, nowMin: number) {
 function journeyLive(j: Journey, nowMin: number) {
   const delay = Math.max(0, j.delayMin ?? 0);
   const dep = departDue(j.departHhmm, nowMin) + delay;
-  if (dep < 0) return false;
+  const arr = departDue(j.arriveHhmm, nowMin);
+  if (dep < -1 && arr <= 0) return false;
   const horizon = firstTrainWindow(nowMin) ? 12 * 60 : 180;
   if (dep > horizon) return false;
-  return true;
+  if (dep >= -1) return true;
+  return arr > 0;
+}
+
+function pickByClock(list: Journey[], nowMin: number) {
+  if (!list.length) return undefined;
+  const open = list.filter((j) => journeyLive(j, nowMin));
+  const pool = open.length ? open : list;
+  let best = pool[0]!;
+  let bestAbs = Infinity;
+  for (const j of pool) {
+    const dep = departDue(j.departHhmm, nowMin) + Math.max(0, j.delayMin ?? 0);
+    const abs = Math.abs(dep);
+    const bestDep = departDue(best.departHhmm, nowMin) + Math.max(0, best.delayMin ?? 0);
+    if (abs < bestAbs || (abs === bestAbs && dep >= 0 && bestDep < 0)) {
+      bestAbs = abs;
+      best = j;
+    }
+  }
+  return best;
 }
 
 function localJourneys(origin: StationHit | { lng: number; lat: number }, dest: StationHit) {
@@ -356,14 +376,10 @@ export async function applyTrip(origin: StationHit | { lng: number; lat: number 
     if (oName && destName) {
       const clock = tokyoParts(simNow());
       const nowMin = clock.hour * 60 + clock.minute;
-      const due = (j: Journey) => {
-        const dep = departDue(j.departHhmm, nowMin) + Math.max(0, j.delayMin ?? 0);
-        if (dep >= -1) return true;
-        const arr = departDue(j.arriveHhmm, nowMin);
-        return arr > 0 && dep > -25;
-      };
-      let yahoo = await pullYahoo("1", clock.hour, clock.minute);
-      if (!yahoo.length) yahoo = await pullYahoo("1", clock.hour, clock.minute, true);
+      const due = (j: Journey) => journeyLive(j, nowMin);
+      const qMin = (nowMin - 15 + 1440) % 1440;
+      let yahoo = await pullYahoo("1", Math.floor(qMin / 60), qMin % 60);
+      if (!yahoo.length) yahoo = await pullYahoo("1", Math.floor(qMin / 60), qMin % 60, true);
       let live = yahoo.filter(due);
       if (!live.length) live = yahoo;
       if (!live.length) {
@@ -381,12 +397,7 @@ export async function applyTrip(origin: StationHit | { lng: number; lat: number 
   } finally {
     const clock = tokyoParts(simNow());
     const nowMin = clock.hour * 60 + clock.minute;
-    const stillDue = (j: Journey) => {
-      const dep = departDue(j.departHhmm, nowMin) + Math.max(0, j.delayMin ?? 0);
-      if (dep >= -1) return true;
-      const arr = departDue(j.arriveHhmm, nowMin);
-      return arr > 0 && dep > -25;
-    };
+    const stillDue = (j: Journey) => journeyLive(j, nowMin);
     const store = useMapStore.getState();
     let live: Journey[] = journeys.filter(stillDue);
     if (!live.length) live = journeys.slice();
@@ -413,7 +424,7 @@ export async function applyTrip(origin: StationHit | { lng: number; lat: number 
       return;
     }
     store.setSearching(false);
-    const upcoming = final.find((j) => departDue(j.departHhmm, nowMin) + Math.max(0, j.delayMin ?? 0) >= -1) ?? final[0];
+    const upcoming = pickByClock(final, nowMin) ?? final[0];
     const idx = Math.max(0, upcoming ? final.indexOf(upcoming) : 0);
     store.setJourneys(final, idx);
     if (upcoming) lockJourneyTrain(upcoming, { camera: !silent && !skipCamera, keepSheet: false });

@@ -1,5 +1,5 @@
 /* J PWA — never hijack navigations or scripts. Old interceptors caused a black screen. */
-const SW_VER = "j-v20";
+const SW_VER = "j-v19";
 const TILES = "jb-tiles-v1";
 const STATIC = "jb-static-v1";
 

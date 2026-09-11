@@ -39,8 +39,6 @@ export function AppShell() {
   const selectedKonbini = useMapStore((s) => s.selectedKonbini);
   const selectedPeak = useMapStore((s) => s.selectedPeak);
   const selectedTrain = useMapStore((s) => s.selectedTrain);
-  const hideGuide = useMapStore((s) => s.hideGuide);
-  const followTrainId = useMapStore((s) => s.followTrainId);
   const odptKey = useMapStore((s) => s.odptKey);
   const night = isNightService(tokyoParts(simNow()).minutes);
   const onRide = Boolean((selectedTrain || journey) && !sheetOpen && !selectedStay && !selectedKonbini);
@@ -125,12 +123,9 @@ export function AppShell() {
         s.setOrigin(null);
         return;
       }
-      if (s.followTrainId) {
-        s.setFollowTrainId(null);
-        return;
-      }
-      if (s.selectedTrain) {
+      if (s.selectedTrain || s.followTrainId) {
         s.selectTrain(null);
+        s.setFollowTrainId(null);
         return;
       }
       if (s.pickField) {
@@ -377,13 +372,12 @@ export function AppShell() {
       )}
 
       {onRide ? (
-        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-50 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
           <div className="pointer-events-auto mx-auto w-full max-w-md">
             <FollowCard />
           </div>
         </div>
       ) : null}
-      {hideGuide || followTrainId ? <div className="pointer-events-auto absolute inset-0 z-10" /> : null}
 
       <PartySafe />
     </div>

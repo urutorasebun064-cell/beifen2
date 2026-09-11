@@ -16,28 +16,11 @@ export function FollowCard() {
   const lang = useMapStore((s) => s.lang);
   const t = copies[lang];
   const train = useMapStore((s) => s.selectedTrain);
-  const hideGuide = useMapStore((s) => s.hideGuide);
   const followTrainId = useMapStore((s) => s.followTrainId);
   const journey = useMapStore((s) => s.journey);
   const liveTrains = useMapStore((s) => s.liveTrains);
-  const [locked, setLocked] = useState(false);
-  const chasing = locked || hideGuide || Boolean(followTrainId);
   if (!train && !journey) return null;
-  if (chasing) {
-    return (
-      <Button
-        variant="solid"
-        className="h-12 w-full"
-        onClick={() => {
-          setLocked(false);
-          useMapStore.setState({ followTrainId: null, hideGuide: false });
-        }}
-      >
-        <TrainFront />
-        {t.unfollow}
-      </Button>
-    );
-  }
+  const live = Boolean(train && followTrainId === train.id);
   const realtimeSec = liveDelaySeconds(train, liveTrains);
   const tripSec = journeyDelaySeconds(journey);
   const guide = journey && train?.kind !== "flight" ? journeyGuide(journey, train, t) : null;
@@ -116,16 +99,21 @@ export function FollowCard() {
       <div className="mt-3 flex gap-2">
         {train ? (
           <Button
-            variant="quiet"
+            variant={live ? "solid" : "quiet"}
             size="sm"
             className="min-w-0 flex-1"
             onClick={() => {
-              setLocked(true);
-              useMapStore.setState({ followTrainId: train.id, hideGuide: true });
+              const s = useMapStore.getState();
+              if (live) {
+                s.setFollowTrainId(null);
+                return;
+              }
+              s.setFollowTrainId(train.id);
+              s.requestFlyTo({ lng: train.lng, lat: train.lat, zoom: 14, bearing: 0, pitch: 0.55 });
             }}
           >
             <TrainFront />
-            {t.lockFollow}
+            {live ? t.unfollow : t.lockFollow}
           </Button>
         ) : null}
         {journey ? (

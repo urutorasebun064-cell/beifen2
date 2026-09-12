@@ -4264,7 +4264,7 @@ export function CanvasMap() {
 
         drawJourneyPulse(ctx, camRef.current, w, h, ts, lineRef.current, "ride");
 
-        if (trainCards.length) {
+        if (trainCards.length && !useMapStore.getState().guideHidden) {
           const loc = useMapStore.getState().lang;
           const txt = copies[loc];
           const journey = useMapStore.getState().journey;
@@ -4837,6 +4837,52 @@ export function CanvasMap() {
             s.selectQuake(hitQ);
             s.requestFlyTo({ lng: hitQ.lng, lat: hitQ.lat, zoom: 8.8, bearing: 0, pitch: 0.92 });
           }
+          return;
+        }
+      }
+      if (useMapStore.getState().journey) {
+        const hitSt = hitStationNear(36);
+        let hitRail = Boolean(hitSt);
+        if (!hitRail) {
+          for (const t of trainsRef.current) {
+            const [x, y] = project(t.lng, t.lat, cam, w, h, vehicleAlt(t));
+            let d = Math.hypot(x - sx, y - sy);
+            if (t.kind === "flight") {
+              const [gx, gy] = project(t.lng, t.lat, cam, w, h, 0);
+              d = Math.min(d, Math.hypot(gx - sx, gy - sy));
+            }
+            const rad = t.kind === "flight" ? (cam.zoom < 7.2 ? 36 : 52) : 28;
+            if (d <= rad) {
+              hitRail = true;
+              break;
+            }
+          }
+        }
+        if (!hitRail) {
+          const segs = remainingJourneySegs(lineRef.current);
+          for (const seg of segs) {
+            const pts = seg.pts;
+            for (let i = 1; i < pts.length; i++) {
+              const a = pts[i - 1]!;
+              const b = pts[i]!;
+              const [x1, y1] = project(a[0], a[1], cam, w, h);
+              const [x2, y2] = project(b[0], b[1], cam, w, h);
+              if (!Number.isFinite(x1) || !Number.isFinite(x2)) continue;
+              const dx = x2 - x1;
+              const dy = y2 - y1;
+              const len = dx * dx + dy * dy;
+              let u = 0;
+              if (len > 1e-6) u = Math.max(0, Math.min(1, ((sx - x1) * dx + (sy - y1) * dy) / len));
+              if (Math.hypot(sx - (x1 + u * dx), sy - (y1 + u * dy)) < 18) {
+                hitRail = true;
+                break;
+              }
+            }
+            if (hitRail) break;
+          }
+        }
+        if (hitRail) {
+          useMapStore.getState().toggleGuideHidden();
           return;
         }
       }

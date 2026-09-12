@@ -53,11 +53,13 @@ type MapStore = {
   journey: Journey | null;
   journeys: Journey[];
   journeyIndex: number;
+  guideHidden: boolean;
   setOrigin: (station: StationHit | null) => void;
   setDest: (station: StationHit | null) => void;
   setJourney: (journey: Journey | null) => void;
   setJourneys: (journeys: Journey[], index?: number) => void;
   clearTrip: () => void;
+  toggleGuideHidden: () => void;
   dismissPick: () => void;
   pickField: "from" | "to" | null;
   setPickField: (field: "from" | "to" | null) => void;
@@ -218,16 +220,27 @@ export const useMapStore = create<MapStore>((set, get) => ({
   journey: null,
   journeys: [],
   journeyIndex: 0,
+  guideHidden: false,
   setOrigin: (originStation) => set({ originStation }),
   setDest: (destStation) => set({ destStation }),
-  setJourney: (journey) => set({ journey, journeys: journey ? [journey] : [], journeyIndex: 0 }),
+  setJourney: (journey) => set({ journey, journeys: journey ? [journey] : [], journeyIndex: 0, guideHidden: false }),
   setJourneys: (journeys, index = 0) =>
-    set({
-      journeys,
-      journeyIndex: Math.max(0, Math.min(index, Math.max(0, journeys.length - 1))),
-      journey: journeys[index] ?? journeys[0] ?? null,
+    set((s) => {
+      const next = journeys[index] ?? journeys[0] ?? null;
+      const same =
+        Boolean(s.journey && next) &&
+        s.journey!.departHhmm === next!.departHhmm &&
+        s.journey!.origin?.name === next!.origin?.name &&
+        s.journey!.dest?.name === next!.dest?.name;
+      return {
+        journeys,
+        journeyIndex: Math.max(0, Math.min(index, Math.max(0, journeys.length - 1))),
+        journey: next,
+        guideHidden: same ? s.guideHidden : false,
+      };
     }),
-  clearTrip: () => set({ destStation: null, journey: null, journeys: [], journeyIndex: 0 }),
+  clearTrip: () => set({ destStation: null, journey: null, journeys: [], journeyIndex: 0, guideHidden: false }),
+  toggleGuideHidden: () => set((s) => ({ guideHidden: !s.guideHidden })),
   dismissPick: () =>
     set({
       selectedTrain: null,

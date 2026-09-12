@@ -118,7 +118,7 @@ async function yahooPage(
     type,
     ticket: "ic",
     expkind: "1",
-    ws: "3",
+    ws: "2",
     s: "0",
     al: "1",
     shin: "1",

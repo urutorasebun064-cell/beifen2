@@ -249,24 +249,8 @@ export const Route = createFileRoute("/api/transit")({
             first = rows;
             if (first.length) break;
           }
-          if (type === "1" && first.length) {
-            const last = parseHhmm(first[first.length - 1]?.departHhmm);
-            if (last) {
-              const n = bumpMinute(last.hh, last.mm, 1);
-              const extra = await yahooPage(usedFrom, usedTo, y ?? "", mo ?? "", d ?? "", n.hh, n.mm, "1", origin, dest, usedExtra);
-              if (extra.journeys.length) {
-                const seen = new Set(first.map(jid));
-                for (const j of journeysForStations(extra.journeys, origin, dest)) {
-                  const id = jid(j);
-                  if (seen.has(id)) continue;
-                  seen.add(id);
-                  first.push(j);
-                }
-              }
-            }
-          }
           const dia = await diaP.catch(() => []);
-          const journeys = first.slice(0, 12).map((j) => stampYahooDia(j, dia));
+          const journeys = first.slice(0, 6).map((j) => stampYahooDia(j, dia));
           if (journeys.length) cache.set(cacheId, { at: Date.now(), journey: journeys[0], journeys });
           return Response.json({ ok: true, journey: journeys[0] ?? null, journeys });
         } catch {

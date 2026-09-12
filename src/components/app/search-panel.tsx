@@ -66,20 +66,6 @@ function pushJourney(list: Journey[], seen: Set<string>, j: Journey | null | und
   list.push(lined);
 }
 
-function tripKm(j: Journey) {
-  const a = j.origin;
-  const b = j.dest;
-  if (!a || !b) return 0;
-  const dy = (a.lat - b.lat) * 111;
-  const dx = (a.lng - b.lng) * 91;
-  return Math.hypot(dx, dy);
-}
-
-function isLongTrip(j: Journey | undefined) {
-  if (!j) return false;
-  return j.totalMinutes >= 150 || (j.transfers ?? 0) >= 3 || tripKm(j) >= 120;
-}
-
 function routeShape(j: Journey) {
   return j.legs.map((l) => `${l.kind}:${l.lineName ?? ""}:${l.from.name}:${l.to.name}`).join("|");
 }
@@ -373,28 +359,8 @@ export async function applyTrip(origin: StationHit | { lng: number; lat: number 
       const notPassed = (j: Journey) => departDue(j.departHhmm, nowMin) + Math.max(0, j.delayMin ?? 0) >= 0;
       let yahoo = await pullYahoo("1", clock.hour, clock.minute);
       if (!yahoo.length) yahoo = await pullYahoo("1", clock.hour, clock.minute, true);
-      const longHaul = yahoo.some(isLongTrip);
-      const firstWait = yahoo[0] ? departDue(yahoo[0]!.departHhmm, nowMin) + Math.max(0, yahoo[0]!.delayMin ?? 0) : 99;
-      if (!longHaul && yahoo.length && firstWait > 0) {
-        const prev = (nowMin + 1439) % 1440;
-        const edge = await pullYahoo("1", Math.floor(prev / 60), prev % 60);
-        if (edge.length) {
-          const seen = new Set(yahoo.map((j) => `${j.departHhmm}|${routeShape(j)}`));
-          const add = edge.filter((j) => notPassed(j) && !seen.has(`${j.departHhmm}|${routeShape(j)}`));
-          add.sort((a, b) => departDue(a.departHhmm, nowMin) - departDue(b.departHhmm, nowMin));
-          yahoo = add.concat(yahoo);
-        }
-      }
       let live = yahoo.filter(notPassed);
       if (!live.length) live = yahoo.slice();
-      if (!longHaul) {
-        live.sort((a, b) => {
-          const da = departDue(a.departHhmm, nowMin) + Math.max(0, a.delayMin ?? 0);
-          const db = departDue(b.departHhmm, nowMin) + Math.max(0, b.delayMin ?? 0);
-          if (da !== db) return da - db;
-          return a.totalMinutes - b.totalMinutes;
-        });
-      }
       if (!live.length) {
         const last = await pullYahoo("2");
         live = last.filter(notPassed);
@@ -414,20 +380,12 @@ export async function applyTrip(origin: StationHit | { lng: number; lat: number 
     const store = useMapStore.getState();
     let live: Journey[] = journeys.filter(stillDue);
     if (!live.length) live = journeys.slice();
-    if (!live.some(isLongTrip)) {
-      live.sort((a, b) => {
-        const da = departDue(a.departHhmm, nowMin) + Math.max(0, a.delayMin ?? 0);
-        const db = departDue(b.departHhmm, nowMin) + Math.max(0, b.delayMin ?? 0);
-        if (da !== db) return da - db;
-        return a.totalMinutes - b.totalMinutes;
-      });
-    }
     if (!live.length) {
       store.setJourneys([]);
       if (!silent) store.setSearching(false);
       return;
     }
-    const shown = live.slice(0, 12).map((j) => stampJourneyDelay(j, store.liveTrains));
+    const shown = live.slice(0, 6).map((j) => stampJourneyDelay(j, store.liveTrains));
     const keep = shown.filter(stillDue);
     const final = keep.length ? keep : shown;
     if (!final.length) {
@@ -445,6 +403,7 @@ export async function applyTrip(origin: StationHit | { lng: number; lat: number 
       return;
     }
     store.setSearching(false);
+    store.setPickField(null);
     const upcoming = final.find((j) => departDue(j.departHhmm, nowMin) + Math.max(0, j.delayMin ?? 0) >= 0) ?? final[0];
     const idx = Math.max(0, upcoming ? final.indexOf(upcoming) : 0);
     store.setJourneys(final, idx);

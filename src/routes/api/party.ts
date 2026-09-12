@@ -19,7 +19,7 @@ const VAPID_FILE = join(process.cwd(), ".data", "party-vapid.json");
 
 type PushSub = { endpoint: string; p256dh: string; auth: string };
 type Member = { id: string; nick: string; token: string; last: number; online: boolean; host?: boolean; lng?: number; lat?: number; pinAt?: number; near?: string; pinOff?: boolean; push?: PushSub };
-type Msg = { id: number; nick: string; body: string; at: string; uid?: string };
+type Msg = { id: number; nick: string; body: string; at: string; uid?: string; tr?: { ja?: string; en?: string; zh?: string } };
 type Room = { name: string; pass: string; hostId: string; members: Member[]; messages: Msg[]; msgId: number; msgTotal: number; expiresAt: number; born?: number; boundNicks?: Record<string, string>; clearedAt?: number; memRev?: number };
 type Saved = Room & { key: string };
 
@@ -108,40 +108,93 @@ async function ensureVapid() {
   }
 }
 
+type GP = typeof globalThis & { __jbPartyPush?: Map<string, { uid: string; room: string; endpoint: string; p256dh: string; auth: string }> };
+const partyPush: Map<string, { uid: string; room: string; endpoint: string; p256dh: string; auth: string }> =
+  (globalThis as GP).__jbPartyPush ?? ((globalThis as GP).__jbPartyPush = new Map());
+
+async function rememberPush(roomKey: string, uid: string, sub: PushSub) {
+  if (!roomKey || !uid || !sub.endpoint) return;
+  const row = { uid, room: roomKey, endpoint: sub.endpoint, p256dh: sub.p256dh, auth: sub.auth };
+  partyPush.set(`${roomKey}:${uid}`, row);
+  try {
+    const sql = await getSql();
+    await sql.query("create table if not exists party_push (k text primary key, room text, uid text, endpoint text, p256dh text, auth text)");
+    await sql.query(
+      "insert into party_push (k, room, uid, endpoint, p256dh, auth) values ($1,$2,$3,$4,$5,$6) on conflict (k) do update set endpoint=$4, p256dh=$5, auth=$6",
+      [`${roomKey}:${uid}`, roomKey, uid, sub.endpoint, sub.p256dh, sub.auth],
+    );
+  } catch {
+    /* */
+  }
+}
+
+async function listPushes(roomKey: string) {
+  const out: { uid: string; endpoint: string; p256dh: string; auth: string }[] = [];
+  for (const p of partyPush.values()) {
+    if (p.room === roomKey) out.push(p);
+  }
+  try {
+    const sql = await getSql();
+    await sql.query("create table if not exists party_push (k text primary key, room text, uid text, endpoint text, p256dh text, auth text)");
+    const rows = await sql.query<{ uid: string; endpoint: string; p256dh: string; auth: string }>(
+      "select uid, endpoint, p256dh, auth from party_push where room = $1",
+      [roomKey],
+    );
+    for (const r of rows) {
+      if (!r.endpoint || out.some((p) => p.endpoint === r.endpoint)) continue;
+      out.push({ uid: r.uid, endpoint: r.endpoint, p256dh: r.p256dh, auth: r.auth });
+    }
+  } catch {
+    /* */
+  }
+  return out;
+}
+
 async function pingPush(room: Room, exceptId: string) {
   const keys = await ensureVapid();
   if (!keys?.publicKey || !keys.privateKey) return;
-  let wp: {
+  type WP = {
     setVapidDetails: (a: string, b: string, c: string) => void;
     sendNotification: (sub: unknown, payload: string, opts?: { TTL?: number; urgency?: string }) => Promise<unknown>;
-  } | null = null;
+  };
+  let wp: WP | null = null;
   try {
-    const mod = await import("web-push");
-    wp = (mod as { default?: typeof wp }).default ?? (mod as typeof wp);
+    const mod = (await import("web-push")) as { default?: WP } & WP;
+    wp = mod.sendNotification ? mod : mod.default ?? null;
   } catch {
     return;
   }
-  if (!wp) return;
+  if (!wp?.sendNotification || !wp.setVapidDetails) return;
   try {
     wp.setVapidDetails("mailto:party@jbmap.app", keys.publicKey, keys.privateKey);
   } catch {
     return;
   }
-  const payload = JSON.stringify({ title: "J-Bmap", body: "•", tag: "jb-party" });
-  const jobs = room.members
-    .filter((m) => m.id !== exceptId && m.push?.endpoint && m.push.p256dh && m.push.auth)
-    .map((m) =>
-      wp
-        .sendNotification(
-          { endpoint: m.push!.endpoint, keys: { p256dh: m.push!.p256dh, auth: m.push!.auth } },
-          payload,
-          { TTL: 86400, urgency: "high" },
-        )
-        .catch((err: { statusCode?: number }) => {
-          const code = Number(err?.statusCode);
-          if (code === 404 || code === 410) m.push = undefined;
-        }),
-    );
+  const last = room.messages[room.messages.length - 1];
+  const preview = last ? `${last.nick}: ${(last.body || "•").slice(0, 40)}` : "•";
+  const payload = JSON.stringify({ title: "J", body: preview, tag: "jb-party" });
+  const roomKey = keyOf(room.name);
+  const bag = new Map<string, { uid: string; endpoint: string; p256dh: string; auth: string }>();
+  for (const m of room.members) {
+    if (!m.push?.endpoint || m.id === exceptId) continue;
+    bag.set(m.push.endpoint, { uid: m.id, endpoint: m.push.endpoint, p256dh: m.push.p256dh, auth: m.push.auth });
+  }
+  for (const p of await listPushes(roomKey)) {
+    if (p.uid === exceptId || !p.endpoint) continue;
+    if (!bag.has(p.endpoint)) bag.set(p.endpoint, p);
+  }
+  const jobs = [...bag.values()].map((p) =>
+    wp
+      .sendNotification({ endpoint: p.endpoint, keys: { p256dh: p.p256dh, auth: p.auth } }, payload, { TTL: 86400, urgency: "high" })
+      .catch((err: { statusCode?: number }) => {
+        const code = Number(err?.statusCode);
+        if (code === 404 || code === 410) {
+          const hit = room.members.find((m) => m.push?.endpoint === p.endpoint);
+          if (hit) hit.push = undefined;
+          partyPush.delete(`${roomKey}:${p.uid}`);
+        }
+      }),
+  );
   if (!jobs.length) return;
   await Promise.race([Promise.allSettled(jobs), new Promise((r) => setTimeout(r, 8000))]);
 }
@@ -220,18 +273,10 @@ function gtxLang(lang: string) {
   return "ja";
 }
 
-function guessSrcLang(s: string) {
-  if (/[\u3040-\u30ff]/.test(s)) return "ja";
-  if (/[A-Za-z]/.test(s) && !/[\u3040-\u9fff]/.test(s)) return "en";
-  if (/[们这过说时对会发为来现经与从还吗哪吧呢啊什么条马气车门开问间阴阳头后进给让该着个国干儿只么您]/u.test(s)) return "zh-CN";
-  if (/[\u4e00-\u9fff]/.test(s)) return "ja";
-  return "";
-}
-
-function sameLang(sl: string, tl: string) {
-  const a = sl.replace(/-CN$/i, "").replace(/-TW$/i, "").toLowerCase();
-  const b = tl.replace(/-CN$/i, "").replace(/-TW$/i, "").toLowerCase();
-  return Boolean(a && b && a === b);
+function shouldSkipTr(src: string, tl: string) {
+  if (tl === "ja" && /[\u3040-\u30ff]/.test(src) && !/[A-Za-z]/.test(src)) return true;
+  if (tl === "en" && /^[A-Za-z0-9\s.,!?'"+\-:/]+$/.test(src) && !/[\u3040-\u9fff]/.test(src)) return true;
+  return false;
 }
 
 function badTr(s: string) {
@@ -265,20 +310,18 @@ function parseGtx(data: unknown): { text: string; sl: string } {
 async function translateOne(text: string, lang: string) {
   const src = text.slice(0, 160);
   if (!src) return "";
-  const key = `v2:${lang}:${src}`;
+  const key = `v3:${lang}:${src}`;
   const hit = chatTr.get(key);
   if (hit && !badTr(hit) && hit !== "__miss__") return hit;
   const tl = gtxLang(lang);
-  const sl = guessSrcLang(src);
-  if (sl && sameLang(sl, tl)) {
+  if (shouldSkipTr(src, tl)) {
     chatTr.set(key, src);
     return src;
   }
   let out = "";
-  const pair = sl || "auto";
   const urls = [
-    `https://clients5.google.com/translate_a/t?client=dict-chrome-ex&sl=${encodeURIComponent(pair)}&tl=${encodeURIComponent(tl)}&q=${encodeURIComponent(src)}`,
-    `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${encodeURIComponent(pair)}&tl=${encodeURIComponent(tl)}&dt=t&q=${encodeURIComponent(src)}`,
+    `https://clients5.google.com/translate_a/t?client=dict-chrome-ex&sl=auto&tl=${encodeURIComponent(tl)}&q=${encodeURIComponent(src)}`,
+    `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=${encodeURIComponent(tl)}&dt=t&q=${encodeURIComponent(src)}`,
   ];
   for (const url of urls) {
     try {
@@ -291,10 +334,6 @@ async function translateOne(text: string, lang: string) {
       const raw = await res.text();
       if (!raw || ctype.includes("text/html")) continue;
       const parsed = parseGtx(JSON.parse(raw) as unknown);
-      if (parsed.sl && sameLang(parsed.sl, tl)) {
-        out = src;
-        break;
-      }
       if (parsed.text && !badTr(parsed.text)) {
         out = parsed.text;
         break;
@@ -1094,6 +1133,12 @@ export const Route = createFileRoute("/api/party")({
     handlers: {
       GET: async ({ request }) => {
         const url = new URL(request.url);
+        if (url.searchParams.get("action") === "translate") {
+          const lang = url.searchParams.get("lang") ?? "ja";
+          const texts = (url.searchParams.get("q") ?? "").split("\n").map((x) => x.trim()).filter(Boolean).slice(0, 20);
+          const map = await translateMany(texts, lang);
+          return json({ ok: true, map });
+        }
         if (url.searchParams.get("list") === "1") {
           await hydrateGoneSql();
           hydrateFile();
@@ -1255,17 +1300,26 @@ export const Route = createFileRoute("/api/party")({
           const auth = String(body.auth ?? "").trim().slice(0, 80);
           if (!endpoint.startsWith("http") || !p256dh || !auth) return json({ ok: false, error: "need" }, 400);
           me.push = { endpoint, p256dh, auth };
+          await rememberPush(found.key, me.id, me.push);
           await saveRoom(found.key, room);
           return json({ ok: true, vapid: await vapidOut(), ...publicOf(room, me.id, was), you: me.nick, youId: me.id, host: me.id === room.hostId });
         }
         if (action === "send") {
           if (!text) return json({ ok: false, error: "need" }, 400);
+          let tr: { ja?: string; en?: string; zh?: string } | undefined;
+          try {
+            const [ja, en, zh] = await Promise.all([translateOne(text, "ja"), translateOne(text, "en"), translateOne(text, "zh")]);
+            tr = { ja, en, zh };
+          } catch {
+            tr = undefined;
+          }
           room.messages.push({
             id: room.msgId++,
             nick: me.nick,
             body: text,
             at: new Date().toISOString(),
             uid: me.id,
+            ...(tr ? { tr } : {}),
           });
           trimMessages(room);
           bumpTtl(room);

@@ -1,5 +1,5 @@
 /* J PWA — never hijack navigations or scripts. Old interceptors caused a black screen. */
-const SW_VER = "j-v23";
+const SW_VER = "j-v25";
 const TILES = "jb-tiles-v1";
 const STATIC = "jb-static-v1";
 
@@ -74,8 +74,19 @@ self.addEventListener("fetch", (event) => {
 self.addEventListener("push", (event) => {
   event.waitUntil(
     (async () => {
+      let body = "•";
+      try {
+        const data = event.data ? event.data.json() : null;
+        if (data && data.body) body = String(data.body).slice(0, 80);
+      } catch {
+        try {
+          const raw = event.data ? event.data.text() : "";
+          if (raw) body = raw.slice(0, 80);
+        } catch {
+          /* */
+        }
+      }
       const list = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
-      const visible = list.some((c) => c.visibilityState === "visible");
       list.forEach((c) => c.postMessage({ type: "party-alert" }));
       try {
         if (self.navigator?.setAppBadge) await self.navigator.setAppBadge(1);
@@ -83,8 +94,8 @@ self.addEventListener("push", (event) => {
         /* */
       }
       await self.registration.showNotification("J", {
-        body: "•",
-        tag: "jb-party",
+        body,
+        tag: "jb-party-" + Date.now(),
         icon: "/icon-192.png",
         badge: "/icon-192.png",
         silent: false,
@@ -92,14 +103,6 @@ self.addEventListener("push", (event) => {
         vibrate: [40, 80, 40],
         data: { type: "party-alert" },
       });
-      if (visible) {
-        try {
-          const notes = await self.registration.getNotifications({ tag: "jb-party" });
-          notes.forEach((n) => n.close());
-        } catch {
-          /* */
-        }
-      }
     })(),
   );
 });

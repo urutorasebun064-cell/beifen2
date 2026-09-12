@@ -10,7 +10,7 @@ import { useMapStore } from "@/store/map-store";
 import { patchSave } from "@/lib/save-sync";
 
 type Member = { id: string; nick: string; online?: boolean; host?: boolean; lng?: number; lat?: number; pinAt?: number; near?: string };
-type Msg = { id: number; nick: string; body: string; at: string; uid?: string };
+type Msg = { id: number; nick: string; body: string; at: string; uid?: string; tr?: { ja?: string; en?: string; zh?: string } };
 type RoomState = { name: string; members: Member[]; messages: Msg[]; seats: number; you?: string; youId?: string; host?: boolean; hostId?: string; expiresAt?: number; vapid?: string; cleared?: number };
 
 function foldMembers(list: Member[], meId: string, you: string) {
@@ -244,7 +244,7 @@ async function bindPush(room: string, token: string, vapid?: string) {
   try {
     if (Notification.permission === "default") await Notification.requestPermission();
     if (Notification.permission !== "granted") return false;
-    const reg = await navigator.serviceWorker.register("/sw.js?v=23", { scope: "/", updateViaCache: "none" });
+    const reg = await navigator.serviceWorker.register("/sw.js?v=25", { scope: "/", updateViaCache: "none" });
     await reg.update().catch(() => undefined);
     const key = url64(vapid);
     let sub = await reg.pushManager.getSubscription();
@@ -297,12 +297,22 @@ async function fillChatTr(bodies: string[], lang: Lang) {
   for (const b of uniq) {
     const k = `${lang}\t${b}`;
     const cached = trCache.get(k);
-    if (cached && !badTr(cached)) continue;
+    if (cached && !badTr(cached) && cached !== b) continue;
     if (cached && badTr(cached)) trCache.delete(k);
     need.push(b);
   }
   if (!need.length) return false;
   let got = false;
+  const apply = (map?: Record<string, string>) => {
+    if (!map) return;
+    for (const [src, dst] of Object.entries(map)) {
+      const out = (dst || "").trim();
+      if (out && !badTr(out) && out !== src) {
+        trCache.set(`${lang}\t${src}`, out);
+        got = true;
+      }
+    }
+  };
   try {
     const res = await fetch("/api/party", {
       method: "POST",
@@ -310,24 +320,28 @@ async function fillChatTr(bodies: string[], lang: Lang) {
       body: JSON.stringify({ action: "translate", lang, texts: need.slice(0, 40) }),
     });
     const data = (await res.json()) as { ok?: boolean; map?: Record<string, string> };
-    if (data.map) {
-      for (const [src, dst] of Object.entries(data.map)) {
-        const out = (dst || "").trim();
-        if (out && !badTr(out)) {
-          trCache.set(`${lang}\t${src}`, out);
-          got = true;
-        }
-      }
-    }
+    apply(data.map);
   } catch {
-    /* keep original until next poll */
+    /* try GET */
+  }
+  if (!got) {
+    try {
+      const q = encodeURIComponent(need.slice(0, 12).join("\n"));
+      const res = await fetch(`/api/party?action=translate&lang=${encodeURIComponent(lang)}&q=${q}`);
+      const data = (await res.json()) as { ok?: boolean; map?: Record<string, string> };
+      apply(data.map);
+    } catch {
+      /* keep original */
+    }
   }
   return got;
 }
 
-function shownChat(body: string, lang: Lang) {
-  const hit = trCache.get(`${lang}\t${body}`) ?? trCache.get(`${lang}\t${body.trim()}`);
-  if (!hit || badTr(hit)) return body;
+function shownChat(row: Msg, lang: Lang) {
+  const fromTr = row.tr?.[lang];
+  if (fromTr && !badTr(fromTr)) return fromTr;
+  const hit = trCache.get(`${lang}\t${row.body}`) ?? trCache.get(`${lang}\t${row.body.trim()}`);
+  if (!hit || badTr(hit)) return row.body;
   return hit;
 }
 
@@ -1252,19 +1266,23 @@ export function PartyWindow() {
                 })}
               </div>
             </div>
-            <div className="relative min-h-0 flex-1 overflow-hidden">
-              <div
-                ref={logRef}
-                data-tr={trTick}
-                className="absolute inset-0 h-full overflow-y-auto overscroll-contain px-3 py-2 [-webkit-overflow-scrolling:touch] [touch-action:pan-y]"
-                onTouchStart={(e) => e.stopPropagation()}
-                onWheel={(e) => e.stopPropagation()}
-                onScroll={() => {
-                  const el = logRef.current;
-                  if (!el) return;
-                  stickRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
-                }}
-              >
+            <div
+              ref={logRef}
+              data-tr={trTick}
+              className="min-h-0 flex-1 overflow-y-scroll overscroll-contain px-3 py-2"
+              style={{ WebkitOverflowScrolling: "touch", touchAction: "pan-y" }}
+              onWheel={(e) => e.stopPropagation()}
+              onTouchMove={() => {
+                const el = logRef.current;
+                if (!el) return;
+                stickRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+              }}
+              onScroll={() => {
+                const el = logRef.current;
+                if (!el) return;
+                stickRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+              }}
+            >
               {messages.length ? (
                 <div className="flex flex-col gap-2">
                   {messages.map((row) => {
@@ -1273,7 +1291,7 @@ export function PartyWindow() {
                       <div key={row.id} className={`flex ${mine ? "justify-end" : "justify-start"}`}>
                         <div className={`max-w-[80%] rounded-[var(--radius-sm)] px-3 py-2 ${mine ? "bg-accent/15" : "bg-fg/5"}`}>
                           <p className={`text-[10px] font-medium text-fg-muted ${mine ? "text-right" : "text-left"}`}>{row.nick}</p>
-                          <p className="text-sm text-fg">{shownChat(row.body, lang)}</p>
+                          <p className="text-sm text-fg">{shownChat(row, lang)}</p>
                         </div>
                       </div>
                     );
@@ -1282,7 +1300,6 @@ export function PartyWindow() {
               ) : (
                 <p className="py-6 text-center text-xs text-fg-muted">{t.partyEmpty}</p>
               )}
-              </div>
             </div>
             <form onSubmit={(e) => void send(e)} className="flex shrink-0 flex-col gap-2 border-t-2 border-fg p-3">
               <div className="flex gap-2">

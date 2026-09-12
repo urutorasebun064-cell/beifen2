@@ -371,13 +371,7 @@ export async function applyTrip(origin: StationHit | { lng: number; lat: number 
         }
       }
       let live = yahoo.filter(notPassed);
-      if (!live.length) live = yahoo.slice();
-      live.sort((a, b) => {
-        const da = departDue(a.departHhmm, nowMin) + Math.max(0, a.delayMin ?? 0);
-        const db = departDue(b.departHhmm, nowMin) + Math.max(0, b.delayMin ?? 0);
-        if (da !== db) return da - db;
-        return a.totalMinutes - b.totalMinutes;
-      });
+      if (!live.length) live = yahoo;
       if (!live.length) {
         const last = await pullYahoo("2");
         live = last.filter(notPassed);
@@ -397,18 +391,12 @@ export async function applyTrip(origin: StationHit | { lng: number; lat: number 
     const store = useMapStore.getState();
     let live: Journey[] = journeys.filter(stillDue);
     if (!live.length) live = journeys.slice();
-    live.sort((a, b) => {
-      const da = departDue(a.departHhmm, nowMin) + Math.max(0, a.delayMin ?? 0);
-      const db = departDue(b.departHhmm, nowMin) + Math.max(0, b.delayMin ?? 0);
-      if (da !== db) return da - db;
-      return a.totalMinutes - b.totalMinutes;
-    });
     if (!live.length) {
       store.setJourneys([]);
       if (!silent) store.setSearching(false);
       return;
     }
-    const shown = live.slice(0, 12).map((j) => stampJourneyDelay(j, store.liveTrains));
+    const shown = live.slice(0, 6).map((j) => stampJourneyDelay(j, store.liveTrains));
     const keep = shown.filter(stillDue);
     const final = keep.length ? keep : shown;
     if (!final.length) {

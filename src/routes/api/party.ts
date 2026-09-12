@@ -20,7 +20,7 @@ const VAPID_FILE = join(process.cwd(), ".data", "party-vapid.json");
 type PushSub = { endpoint: string; p256dh: string; auth: string };
 type Member = { id: string; nick: string; token: string; last: number; online: boolean; host?: boolean; lng?: number; lat?: number; pinAt?: number; near?: string; pinOff?: boolean; push?: PushSub };
 type Msg = { id: number; nick: string; body: string; at: string; uid?: string };
-type Room = { name: string; pass: string; hostId: string; members: Member[]; messages: Msg[]; msgId: number; msgTotal: number; expiresAt: number; born?: number; boundNicks?: Record<string, string> };
+type Room = { name: string; pass: string; hostId: string; members: Member[]; messages: Msg[]; msgId: number; msgTotal: number; expiresAt: number; born?: number; boundNicks?: Record<string, string>; clearedAt?: number };
 type Saved = Room & { key: string };
 
 type G = typeof globalThis & { __jbPartyRooms?: Map<string, Room>; __jbPartyGone?: Map<string, number> };
@@ -224,37 +224,42 @@ type GT = typeof globalThis & { __jbChatTr?: Map<string, string> };
 const chatTr: Map<string, string> =
   (globalThis as GT).__jbChatTr ?? ((globalThis as GT).__jbChatTr = new Map<string, string>());
 
-function guessChatLang(s: string) {
-  if (/[\u3040-\u30ff]/.test(s)) return "ja";
-  if (/[\u4e00-\u9fff]/.test(s)) return "zh";
-  if (/[A-Za-z]/.test(s) && !/[\u3040-\u9fff]/.test(s)) return "en";
-  return "";
-}
-
 async function translateOne(text: string, lang: string) {
   const src = text.slice(0, 160);
   if (!src) return "";
-  if (guessChatLang(src) === lang) return src;
   const key = `${lang}:${src}`;
   const hit = chatTr.get(key);
   if (hit) return hit;
   const tl = gtxLang(lang);
+  let out = "";
   try {
-    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=${tl}&dt=t&q=${encodeURIComponent(src)}`;
-    const res = await fetch(url, { headers: { Accept: "application/json" } });
+    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=${encodeURIComponent(tl)}&dt=t&q=${encodeURIComponent(src)}`;
+    const res = await fetch(url, {
+      headers: { Accept: "application/json", "User-Agent": "Mozilla/5.0" },
+      signal: AbortSignal.timeout(5000),
+    });
     const data = (await res.json()) as unknown;
-    let out = "";
     if (Array.isArray(data) && Array.isArray(data[0])) {
       out = (data[0] as unknown[])
         .map((row) => (Array.isArray(row) ? String(row[0] ?? "") : ""))
         .join("");
     }
-    const textOut = out.trim() || src;
-    chatTr.set(key, textOut);
-    return textOut;
   } catch {
-    return src;
+    out = "";
   }
+  if (!out.trim()) {
+    try {
+      const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(src)}&langpair=aut|${encodeURIComponent(tl)}`;
+      const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
+      const data = (await res.json()) as { responseData?: { translatedText?: string } };
+      out = String(data.responseData?.translatedText ?? "");
+    } catch {
+      out = "";
+    }
+  }
+  const textOut = out.trim() || src;
+  chatTr.set(key, textOut);
+  return textOut;
 }
 
 async function translateMany(texts: string[], lang: string) {
@@ -385,7 +390,18 @@ function normalizeRoom(row: Partial<Room> & { name: string }): Room {
     msgTotal: Math.max(0, Number(row.msgTotal) || 0),
     expiresAt: Number((row as Room).expiresAt) || seedTtl(),
     boundNicks: row.boundNicks && typeof row.boundNicks === "object" ? { ...row.boundNicks } : {},
+    clearedAt: Number(row.clearedAt) || 0,
   };
+}
+
+function unionMsgs(a: Msg[], b: Msg[]) {
+  const map = new Map<number, Msg>();
+  for (const row of a.concat(b)) {
+    const id = Number(row?.id);
+    if (!Number.isFinite(id) || id <= 0) continue;
+    map.set(id, row);
+  }
+  return [...map.values()].sort((x, y) => x.id - y.id).slice(-MSG_MAX);
 }
 
 function mergeRoom(key: string, incoming: Room) {
@@ -398,8 +414,21 @@ function mergeRoom(key: string, incoming: Room) {
     collapseMembers(next);
     return next;
   }
-  if (cur.born) return cur;
-  if (next.messages.length > cur.messages.length) cur.messages = next.messages.slice(-MSG_MAX);
+  if (cur.born) {
+    if ((Number(next.clearedAt) || 0) > (Number(cur.clearedAt) || 0)) {
+      cur.clearedAt = next.clearedAt;
+      cur.messages = next.messages.slice(-MSG_MAX);
+    }
+  } else {
+    const nextWipe = Number(next.clearedAt) || 0;
+    const curWipe = Number(cur.clearedAt) || 0;
+    if (nextWipe > curWipe) {
+      cur.clearedAt = nextWipe;
+      cur.messages = next.messages.slice(-MSG_MAX);
+    } else {
+      cur.messages = unionMsgs(cur.messages, next.messages);
+    }
+  }
   if (next.msgId > cur.msgId) cur.msgId = next.msgId;
   if ((next.msgTotal || 0) > (cur.msgTotal || 0)) cur.msgTotal = next.msgTotal;
   if (next.pass && !cur.pass) cur.pass = next.pass;
@@ -790,6 +819,7 @@ function publicOf(room: Room, touchId?: string, was = "") {
     messages: room.messages.slice(-MSG_MAX),
     seats: PARTY_MAX,
     expiresAt: room.expiresAt,
+    cleared: Number(room.clearedAt) || 0,
   };
 }
 
@@ -1102,7 +1132,7 @@ export const Route = createFileRoute("/api/party")({
             const clash = [...rooms.entries()].find(([k, r]) => !stillGone(k) && !expired(r) && (k === key || keyOf(r.name) === key));
             if (clash) return json({ ok: false, error: "exists" }, 409);
             unmarkGone(key);
-            room = { name, pass: hashPass(pass), hostId: "", members: [], messages: [], msgId: 1, msgTotal: 0, expiresAt: seedTtl(), born: Date.now() };
+            room = { name, pass: hashPass(pass), hostId: "", members: [], messages: [], msgId: 1, msgTotal: 0, expiresAt: seedTtl(), born: Date.now(), clearedAt: Date.now() };
             roomKey = key;
             rooms.set(key, room);
           } else {
@@ -1212,6 +1242,7 @@ export const Route = createFileRoute("/api/party")({
         if (action === "clear") {
           if (me.id !== room.hostId) return json({ ok: false, error: "host" }, 403);
           room.messages = [];
+          room.clearedAt = Date.now();
           for (const m of room.members) {
             m.lng = undefined;
             m.lat = undefined;

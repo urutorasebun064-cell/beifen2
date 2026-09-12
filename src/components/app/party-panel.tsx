@@ -11,7 +11,7 @@ import { patchSave } from "@/lib/save-sync";
 
 type Member = { id: string; nick: string; online?: boolean; host?: boolean; lng?: number; lat?: number; pinAt?: number; near?: string };
 type Msg = { id: number; nick: string; body: string; at: string; uid?: string };
-type RoomState = { name: string; members: Member[]; messages: Msg[]; seats: number; you?: string; youId?: string; host?: boolean; hostId?: string; expiresAt?: number; vapid?: string };
+type RoomState = { name: string; members: Member[]; messages: Msg[]; seats: number; you?: string; youId?: string; host?: boolean; hostId?: string; expiresAt?: number; vapid?: string; cleared?: number };
 
 function foldMembers(list: Member[], meId: string, you: string) {
   const me = you.trim();
@@ -267,12 +267,20 @@ async function bindPush(room: string, token: string, vapid?: string) {
 }
 
 const trCache = new Map<string, string>();
+const trFail = new Set<string>();
 
 function guessChatLang(s: string): Lang | "" {
   if (/[\u3040-\u30ff]/u.test(s)) return "ja";
-  if (/[\u4e00-\u9fff]/u.test(s)) return "zh";
   if (/[A-Za-z]/.test(s) && !/[\u3040-\u9fff]/u.test(s)) return "en";
+  if (/[\u4e00-\u9fff]/u.test(s)) return "zh";
   return "";
+}
+
+function sameChatLang(s: string, lang: Lang) {
+  const g = guessChatLang(s);
+  if (lang === "en") return g === "en" || (/^[A-Za-z0-9\s.,!?'"+\-:/]+$/.test(s) && !/[\u3040-\u9fff]/u.test(s));
+  if (lang === "ja") return g === "ja";
+  return g === "zh" && !/[A-Za-z]/.test(s) && !/[\u3040-\u30ff]/u.test(s);
 }
 
 async function fillChatTr(bodies: string[], lang: Lang) {
@@ -281,13 +289,14 @@ async function fillChatTr(bodies: string[], lang: Lang) {
   for (const b of uniq) {
     const k = `${lang}\t${b}`;
     if (trCache.has(k)) continue;
-    if (guessChatLang(b) === lang) {
+    if (sameChatLang(b, lang)) {
       trCache.set(k, b);
       continue;
     }
     need.push(b);
   }
   if (!need.length) return false;
+  let got = false;
   try {
     const res = await fetch("/api/party", {
       method: "POST",
@@ -296,13 +305,39 @@ async function fillChatTr(bodies: string[], lang: Lang) {
     });
     const data = (await res.json()) as { ok?: boolean; map?: Record<string, string> };
     if (data.map) {
-      for (const [src, dst] of Object.entries(data.map)) trCache.set(`${lang}\t${src}`, dst || src);
+      for (const [src, dst] of Object.entries(data.map)) {
+        const out = (dst || "").trim();
+        if (out) {
+          trCache.set(`${lang}\t${src}`, out);
+          got = true;
+        }
+      }
     }
-    for (const b of need) if (!trCache.has(`${lang}\t${b}`)) trCache.set(`${lang}\t${b}`, b);
   } catch {
-    for (const b of need) if (!trCache.has(`${lang}\t${b}`)) trCache.set(`${lang}\t${b}`, b);
+    /* try below */
   }
-  return true;
+  const still = need.filter((b) => !trCache.has(`${lang}\t${b}`));
+  for (const b of still.slice(0, 12)) {
+    const k = `${lang}\t${b}`;
+    if (trFail.has(k)) continue;
+    try {
+      const tl = lang === "zh" ? "zh-CN" : lang;
+      const res = await fetch(
+        `https://api.mymemory.translated.net/get?q=${encodeURIComponent(b.slice(0, 160))}&langpair=aut|${tl}`,
+      );
+      const data = (await res.json()) as { responseData?: { translatedText?: string } };
+      const out = String(data.responseData?.translatedText ?? "").trim();
+      if (out) {
+        trCache.set(k, out);
+        got = true;
+      } else {
+        trFail.add(k);
+      }
+    } catch {
+      trFail.add(k);
+    }
+  }
+  return got;
 }
 
 function shownChat(body: string, lang: Lang) {
@@ -428,7 +463,7 @@ export function PartyButton() {
   return (
     <button
       type="button"
-      className={`relative inline-flex min-h-36 w-11 items-center justify-center overflow-visible rounded-[var(--radius-md)] bg-surface/94 py-3 text-xs font-medium shadow-[var(--shadow-border)] backdrop-blur-md [writing-mode:vertical-rl] ${open || inRoom ? "text-accent" : "text-fg"} ${lang === "zh" ? "tracking-normal" : "tracking-[0.18em]"}`}
+      className={`jb-chip relative inline-flex min-h-36 w-11 items-center justify-center overflow-visible rounded-[var(--radius-md)] bg-surface/94 py-3 text-xs font-medium shadow-[var(--shadow-border)] backdrop-blur-md [writing-mode:vertical-rl] ${open || inRoom ? "text-accent" : "text-fg"} ${lang === "zh" ? "tracking-normal" : "tracking-[0.18em]"}`}
       onClick={() => {
         const s = useMapStore.getState();
         if (s.partyInRoom) {
@@ -502,10 +537,26 @@ export function PartyWindow() {
   const vapidRef = useRef("");
   const shareOffRef = useRef(false);
   const pinKeepRef = useRef<{ lng: number; lat: number; near?: string } | null>(null);
+  const clearedRef = useRef(0);
+  const msgsRef = useRef<Msg[]>([]);
   passRef.current = pass;
   nickRef.current = nick;
   joinedRef.current = joined;
   tokenRef.current = token;
+
+  const applyRoom = (data: RoomState) => {
+    const wipe = Number(data.cleared) || 0;
+    if (wipe > clearedRef.current) {
+      clearedRef.current = wipe;
+      msgsRef.current = (data.messages ?? []).filter((m) => m.id > 0);
+    } else if ((data.messages ?? []).some((m) => m.id > 0)) {
+      const map = new Map<number, Msg>();
+      for (const row of msgsRef.current) if (row.id > 0) map.set(row.id, row);
+      for (const row of data.messages ?? []) if (row.id > 0) map.set(row.id, row);
+      msgsRef.current = [...map.values()].sort((a, b) => a.id - b.id);
+    }
+    return { ...data, messages: msgsRef.current };
+  };
 
   useEffect(() => {
     const onMsg = (e: MessageEvent) => {
@@ -645,7 +696,7 @@ export function PartyWindow() {
       });
       setToken(data.token);
       setJoined(data.name || joinedRef.current);
-      setState(data);
+      setState(applyRoom(data));
       return true;
     };
     const pull = async () => {
@@ -703,7 +754,7 @@ export function PartyWindow() {
               m.id === mine || m.nick === nickRef.current ? { ...m, lng: undefined, lat: undefined, near: undefined } : m,
             );
           }
-          setState(data);
+          setState(applyRoom(data));
           if (data.vapid) vapidRef.current = data.vapid;
           if (data.vapid) {
             void bindPush(roomName, tokenRef.current, data.vapid).then((ok) => {
@@ -711,8 +762,9 @@ export function PartyWindow() {
             });
           }
           setPending((rows) => {
-            if (!(data.messages?.length)) return [];
-            return rows.filter((p) => !data.messages?.some((m) => m.body === p.body && (m.uid === userId() || m.nick === p.nick)));
+            const server = msgsRef.current;
+            if (!server.length) return rows;
+            return rows.filter((p) => !server.some((m) => m.body === p.body && (m.uid === userId() || m.nick === p.nick)));
           });
           setErr("");
           return;
@@ -724,6 +776,8 @@ export function PartyWindow() {
           setToken("");
           setState(null);
           setPending([]);
+          msgsRef.current = [];
+          clearedRef.current = 0;
           setRoom("");
           setPass("");
           setErr(t.partyMissing);
@@ -874,8 +928,10 @@ export function PartyWindow() {
       rememberNick(who);
       setNick(who);
       setToken(data.token);
+      msgsRef.current = [];
+      clearedRef.current = 0;
       setJoined(joinedName);
-      setState(data);
+      setState(applyRoom(data));
       lastHeardRef.current = (data.messages ?? []).reduce((n, m) => Math.max(n, m.id || 0), 0);
       unlockPing();
       try {
@@ -942,7 +998,7 @@ export function PartyWindow() {
         }
         return;
       }
-      setState(data);
+      setState(applyRoom(data));
       setPending((rows) => rows.filter((p) => p.id !== local.id));
     } catch {
       /* keep the local bubble; next poll will retry */
@@ -970,6 +1026,8 @@ export function PartyWindow() {
     setToken("");
     setState(null);
     setPending([]);
+    msgsRef.current = [];
+    clearedRef.current = 0;
     useMapStore.getState().setPartyCollapsed(false);
     useMapStore.getState().setPartyPins([]);
     useMapStore.getState().setPartyInRoom(false);
@@ -992,6 +1050,8 @@ export function PartyWindow() {
       setToken("");
       setState(null);
       setPending([]);
+      msgsRef.current = [];
+      clearedRef.current = 0;
       useMapStore.getState().setPartyCollapsed(false);
       useMapStore.getState().setPartyPins([]);
       useMapStore.getState().setPartyInRoom(false);
@@ -1003,7 +1063,7 @@ export function PartyWindow() {
       clearPartyBadge();
       return;
     }
-    setState(data);
+    setState(applyRoom(data));
     setPending([]);
   };
 
@@ -1035,7 +1095,7 @@ export function PartyWindow() {
             if (res.ok && data.ok) {
               shareOffRef.current = false;
               pinKeepRef.current = { lng, lat, near: near || undefined };
-              setState(data);
+              setState(applyRoom(data));
               useMapStore.getState().setPartyCollapsed(true);
               if (isInJapan(lng, lat)) {
                 useMapStore.getState().requestFlyTo({ lng, lat, zoom: 14.2, bearing: 0, pitch: 0.55, center: true });
@@ -1080,7 +1140,7 @@ export function PartyWindow() {
           m.id === mine ? { ...m, lng: undefined, lat: undefined, near: undefined } : m,
         );
       }
-      setState(data);
+      setState(applyRoom(data));
       useMapStore.getState().setPartyPins(useMapStore.getState().partyPins.filter((p) => !p.mine));
     }
   };

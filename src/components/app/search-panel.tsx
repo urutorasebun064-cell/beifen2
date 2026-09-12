@@ -572,16 +572,8 @@ export async function calibrateTrain(train: Train, opts?: { silent?: boolean }) 
       .filter((x): x is { j: Journey; ride: NonNullable<ReturnType<typeof rideOf>>; d: number } => Boolean(x))
       .filter((x) => x.d >= -1 && x.d <= win)
       .sort((a, b) => Math.abs(a.d) - Math.abs(b.d));
-    const lineDelaySec = linedUp.reduce((best, j) => {
-      const ride = j.legs.find(
-        (l) => l.kind === "ride" && l.lineName && railsMatch(l.lineName, train.lineName),
-      );
-      if (!ride && !j.delayAlert && !(j.delaySec || j.delayMin)) return best;
-      if (!ride) return best;
-      return Math.max(best, j.delaySec ?? 0, (j.delayMin ?? 0) * 60);
-    }, 0);
     const hit = close[0];
-    if (!hit && lineDelaySec <= 0 && train.delayMin <= 0 && !(train.delaySec && train.delaySec > 0)) return;
+    if (!hit && train.delayMin <= 0 && !(train.delaySec && train.delaySec > 0)) return;
     const match = hit?.j;
     const ride = hit?.ride;
     const s = useMapStore.getState();
@@ -605,7 +597,6 @@ export async function calibrateTrain(train: Train, opts?: { silent?: boolean }) 
       0,
       match?.delaySec ?? 0,
       (match?.delayMin ?? 0) * 60,
-      lineDelaySec,
       cur.delaySec ?? 0,
       cur.delayMin * 60,
     );

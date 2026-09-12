@@ -1,5 +1,5 @@
 /* J PWA — never hijack navigations or scripts. Old interceptors caused a black screen. */
-const SW_VER = "j-v22";
+const SW_VER = "j-v23";
 const TILES = "jb-tiles-v1";
 const STATIC = "jb-static-v1";
 
@@ -75,14 +75,13 @@ self.addEventListener("push", (event) => {
   event.waitUntil(
     (async () => {
       const list = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
-      const focused = list.some((c) => c.focused);
+      const visible = list.some((c) => c.visibilityState === "visible");
       list.forEach((c) => c.postMessage({ type: "party-alert" }));
       try {
         if (self.navigator?.setAppBadge) await self.navigator.setAppBadge(1);
       } catch {
         /* */
       }
-      if (focused) return;
       await self.registration.showNotification("J", {
         body: "•",
         tag: "jb-party",
@@ -90,9 +89,17 @@ self.addEventListener("push", (event) => {
         badge: "/icon-192.png",
         silent: false,
         renotify: true,
-        vibrate: [40, 40, 40],
+        vibrate: [40, 80, 40],
         data: { type: "party-alert" },
       });
+      if (visible) {
+        try {
+          const notes = await self.registration.getNotifications({ tag: "jb-party" });
+          notes.forEach((n) => n.close());
+        } catch {
+          /* */
+        }
+      }
     })(),
   );
 });

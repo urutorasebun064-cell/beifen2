@@ -135,7 +135,7 @@ async function pingPush(room: Room, exceptId: string) {
         .sendNotification(
           { endpoint: m.push!.endpoint, keys: { p256dh: m.push!.p256dh, auth: m.push!.auth } },
           payload,
-          { TTL: 120, urgency: "high" },
+          { TTL: 86400, urgency: "high" },
         )
         .catch((err: { statusCode?: number }) => {
           const code = Number(err?.statusCode);
@@ -223,8 +223,15 @@ function gtxLang(lang: string) {
 function guessSrcLang(s: string) {
   if (/[\u3040-\u30ff]/.test(s)) return "ja";
   if (/[A-Za-z]/.test(s) && !/[\u3040-\u9fff]/.test(s)) return "en";
-  if (/[\u4e00-\u9fff]/.test(s)) return "zh-CN";
+  if (/[们这过说时对会发为来现经与从还吗哪吧呢啊什么条马气车门开问间阴阳头后进给让该着个国干儿只么您]/u.test(s)) return "zh-CN";
+  if (/[\u4e00-\u9fff]/.test(s)) return "ja";
   return "";
+}
+
+function sameLang(sl: string, tl: string) {
+  const a = sl.replace(/-CN$/i, "").replace(/-TW$/i, "").toLowerCase();
+  const b = tl.replace(/-CN$/i, "").replace(/-TW$/i, "").toLowerCase();
+  return Boolean(a && b && a === b);
 }
 
 function badTr(s: string) {
@@ -236,34 +243,42 @@ type GT = typeof globalThis & { __jbChatTr?: Map<string, string> };
 const chatTr: Map<string, string> =
   (globalThis as GT).__jbChatTr ?? ((globalThis as GT).__jbChatTr = new Map<string, string>());
 
-function parseGtx(data: unknown): string {
-  if (typeof data === "string") return data.trim();
-  if (!Array.isArray(data) || !data.length) return "";
+function parseGtx(data: unknown): { text: string; sl: string } {
+  if (typeof data === "string") return { text: data.trim(), sl: "" };
+  if (!Array.isArray(data) || !data.length) return { text: "", sl: "" };
   const a = data[0];
-  if (typeof a === "string") return a.trim();
+  if (typeof a === "string") return { text: a.trim(), sl: typeof data[1] === "string" ? data[1] : "" };
   if (Array.isArray(a)) {
-    if (typeof a[0] === "string") return String(a[0]).trim();
+    if (typeof a[0] === "string") return { text: String(a[0]).trim(), sl: typeof a[1] === "string" ? a[1] : "" };
     if (Array.isArray(a[0])) {
-      return a
+      const text = a
         .map((row) => (Array.isArray(row) ? String(row[0] ?? "") : ""))
         .join("")
         .trim();
+      const sl = typeof data[2] === "string" ? data[2] : typeof a[0][1] === "string" ? a[0][1] : "";
+      return { text, sl };
     }
   }
-  return "";
+  return { text: "", sl: "" };
 }
 
 async function translateOne(text: string, lang: string) {
   const src = text.slice(0, 160);
   if (!src) return "";
-  const key = `${lang}:${src}`;
+  const key = `v2:${lang}:${src}`;
   const hit = chatTr.get(key);
   if (hit && !badTr(hit) && hit !== "__miss__") return hit;
   const tl = gtxLang(lang);
+  const sl = guessSrcLang(src);
+  if (sl && sameLang(sl, tl)) {
+    chatTr.set(key, src);
+    return src;
+  }
   let out = "";
+  const pair = sl || "auto";
   const urls = [
-    `https://clients5.google.com/translate_a/t?client=dict-chrome-ex&sl=auto&tl=${encodeURIComponent(tl)}&q=${encodeURIComponent(src)}`,
-    `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=${encodeURIComponent(tl)}&dt=t&q=${encodeURIComponent(src)}`,
+    `https://clients5.google.com/translate_a/t?client=dict-chrome-ex&sl=${encodeURIComponent(pair)}&tl=${encodeURIComponent(tl)}&q=${encodeURIComponent(src)}`,
+    `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${encodeURIComponent(pair)}&tl=${encodeURIComponent(tl)}&dt=t&q=${encodeURIComponent(src)}`,
   ];
   for (const url of urls) {
     try {
@@ -275,10 +290,15 @@ async function translateOne(text: string, lang: string) {
       const ctype = res.headers.get("content-type") || "";
       const raw = await res.text();
       if (!raw || ctype.includes("text/html")) continue;
-      const data = JSON.parse(raw) as unknown;
-      out = parseGtx(data);
-      if (out && !badTr(out)) break;
-      out = "";
+      const parsed = parseGtx(JSON.parse(raw) as unknown);
+      if (parsed.sl && sameLang(parsed.sl, tl)) {
+        out = src;
+        break;
+      }
+      if (parsed.text && !badTr(parsed.text)) {
+        out = parsed.text;
+        break;
+      }
     } catch {
       out = "";
     }

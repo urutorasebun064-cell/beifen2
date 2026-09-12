@@ -244,7 +244,7 @@ async function bindPush(room: string, token: string, vapid?: string) {
   try {
     if (Notification.permission === "default") await Notification.requestPermission();
     if (Notification.permission !== "granted") return false;
-    const reg = await navigator.serviceWorker.register("/sw.js?v=22", { scope: "/", updateViaCache: "none" });
+    const reg = await navigator.serviceWorker.register("/sw.js?v=23", { scope: "/", updateViaCache: "none" });
     await reg.update().catch(() => undefined);
     const key = url64(vapid);
     let sub = await reg.pushManager.getSubscription();
@@ -869,6 +869,14 @@ export function PartyWindow() {
 
   const enter = async (e: FormEvent) => {
     e.preventDefault();
+    unlockPing();
+    try {
+      if ("Notification" in window && Notification.permission === "default") {
+        await Notification.requestPermission();
+      }
+    } catch {
+      /* */
+    }
     if (!room.trim() || !pass.trim()) {
       setErr(t.partyNeed);
       return;

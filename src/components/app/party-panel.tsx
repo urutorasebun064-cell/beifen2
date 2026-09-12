@@ -840,6 +840,30 @@ export function PartyWindow() {
     el.scrollTop = el.scrollHeight;
   }, [open, collapsed, joined, state?.messages.at(-1)?.id, pending.length]);
 
+  useEffect(() => {
+    const el = logRef.current;
+    if (!el || !joined || collapsed) return;
+    let y0 = 0;
+    let s0 = 0;
+    const onStart = (e: TouchEvent) => {
+      y0 = e.touches[0]?.clientY ?? 0;
+      s0 = el.scrollTop;
+    };
+    const onMove = (e: TouchEvent) => {
+      const y = e.touches[0]?.clientY ?? y0;
+      el.scrollTop = s0 + (y0 - y);
+      stickRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
+      e.preventDefault();
+      e.stopPropagation();
+    };
+    el.addEventListener("touchstart", onStart, { passive: true });
+    el.addEventListener("touchmove", onMove, { passive: false });
+    return () => {
+      el.removeEventListener("touchstart", onStart);
+      el.removeEventListener("touchmove", onMove);
+    };
+  }, [joined, collapsed, open]);
+
   const sawOpenRef = useRef(false);
   useEffect(() => {
     if (!sawOpenRef.current) {
@@ -1192,7 +1216,7 @@ export function PartyWindow() {
   if (joined && collapsed) return null;
 
   return (
-    <div className="absolute inset-0 z-40 flex items-end justify-center bg-bg/50 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] overscroll-none md:items-center">
+    <div className="absolute inset-0 z-40 flex items-end justify-center bg-bg/50 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] md:items-center">
       <div className={`rpg-frame flex w-full max-w-md flex-col overflow-hidden ${joined ? "h-[min(78vh,36rem)]" : "max-h-[78vh]"}`}>
         <div className="flex items-center justify-between border-b-2 border-fg px-3 py-2.5">
           <p className="flex min-w-0 items-center gap-0.5 text-sm font-medium text-fg">
@@ -1285,25 +1309,17 @@ export function PartyWindow() {
                 })}
               </div>
             </div>
-            <div className="relative min-h-0 flex-1 overflow-hidden">
-              <div
-                ref={logRef}
-                data-tr={trTick}
-                className="absolute inset-0 overflow-y-auto overscroll-contain px-3 py-2"
-                style={{ WebkitOverflowScrolling: "touch", touchAction: "pan-y", overflowAnchor: "none" }}
-                onPointerDownCapture={(e) => e.stopPropagation()}
-                onTouchStartCapture={(e) => {
-                  e.stopPropagation();
-                  stickRef.current = false;
-                }}
-                onTouchMoveCapture={(e) => e.stopPropagation()}
-                onWheel={(e) => e.stopPropagation()}
-                onScroll={() => {
-                  const el = logRef.current;
-                  if (!el) return;
-                  stickRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
-                }}
-              >
+            <div
+              ref={logRef}
+              data-tr={trTick}
+              className="party-log min-h-[8rem] flex-1 overflow-y-scroll px-3 py-2"
+              style={{ height: 0, WebkitOverflowScrolling: "touch", touchAction: "pan-y" }}
+              onScroll={() => {
+                const el = logRef.current;
+                if (!el) return;
+                stickRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
+              }}
+            >
               {messages.length ? (
                 <div className="flex flex-col gap-2">
                   {messages.map((row) => {
@@ -1321,7 +1337,6 @@ export function PartyWindow() {
               ) : (
                 <p className="py-6 text-center text-xs text-fg-muted">{t.partyEmpty}</p>
               )}
-              </div>
             </div>
             <form onSubmit={(e) => void send(e)} className="flex shrink-0 flex-col gap-2 border-t-2 border-fg p-3">
               <div className="flex gap-2">

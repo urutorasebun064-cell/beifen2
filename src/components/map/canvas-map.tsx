@@ -3176,22 +3176,11 @@ function drawTrainCard(
   };
   const isFly = t.kind === "flight";
   const extraFont = "500 11.5px ui-sans-serif, sans-serif";
-  ctx.font = extraFont;
-  const extraMax = Math.max(0, ...parts.map((p) => (p.extra ? ctx.measureText(p.extra).width : 0)));
-  const titleLimit = Math.max(110, maxW - (extraMax ? extraMax + 14 : 0));
-  const fitHead = (text: string) => {
-    for (const px of [13, 12, 11, 10]) {
-      const font = `700 ${px}px ui-sans-serif, sans-serif`;
-      ctx.font = font;
-      if (ctx.measureText(text).width <= titleLimit) return font;
-    }
-    return "700 10px ui-sans-serif, sans-serif";
-  };
-  const fontOf = (tone: string, text = "") =>
+  const fontOf = (tone: string, _text = "") =>
     tone === "head" || tone === "xfer"
       ? isFly
         ? "700 14px ui-sans-serif, sans-serif"
-        : fitHead(text)
+        : "700 12px ui-sans-serif, sans-serif"
       : tone === "time"
         ? "500 12.5px ui-sans-serif, ui-monospace, monospace"
         : isFly
@@ -3199,34 +3188,39 @@ function drawTrainCard(
           : "500 12.5px ui-sans-serif, sans-serif";
   const rows: CardPart[] = [];
   for (const part of parts) {
-    if (!part.text) continue;
-    if (part.tone === "head" || part.tone === "xfer") {
-      rows.push(part);
-      continue;
-    }
-    const wrapped = wrapRow(part.text, fontOf(part.tone, part.text), part.extra ? titleLimit : maxW);
+    if (!part.text && !part.extra) continue;
+    const titleFont = fontOf(part.tone, part.text);
+    const wrapped = part.text ? wrapRow(part.text, titleFont, maxW) : [""];
     wrapped.forEach((text, i) =>
       rows.push({
         text,
-        extra: i === 0 ? part.extra : undefined,
-        extraAlert: i === 0 ? part.extraAlert : undefined,
         tone: part.tone,
       }),
     );
+    if (part.extra) {
+      wrapRow(part.extra, extraFont, maxW).forEach((text) =>
+        rows.push({
+          text: "",
+          extra: text,
+          extraAlert: part.extraAlert,
+          tone: "time",
+        }),
+      );
+    }
   }
   const tw = Math.max(
     0,
     ...rows.map((row) => {
       ctx.font = fontOf(row.tone, row.text);
-      const left = ctx.measureText(row.text).width;
+      const left = row.text ? ctx.measureText(row.text).width : 0;
       ctx.font = extraFont;
-      const right = row.extra ? ctx.measureText(row.extra).width + 12 : 0;
-      return left + right;
+      const right = row.extra ? ctx.measureText(row.extra).width : 0;
+      return Math.max(left, right);
     }),
   );
-  const rowH = (tone: string) => (tone === "head" || tone === "xfer" ? 18 : 16);
+  const rowH = (row: CardPart) => (row.extra && !row.text ? 15 : row.tone === "head" || row.tone === "xfer" ? 20 : 17);
   const cardW = Math.min(maxW + 24, Math.max(240, tw + 24));
-  const cardH = 12 + rows.reduce((n, row) => n + rowH(row.tone), 0);
+  const cardH = 12 + rows.reduce((n, row) => n + rowH(row), 0);
   const cx0 = Math.max(6, Math.min(viewW - cardW - 6, x - cardW / 2));
   const cy0 = y + 12;
   ctx.fillStyle = "rgba(10,14,24,0.94)";
@@ -3243,21 +3237,20 @@ function drawTrainCard(
   ctx.fillRect(cx0, cy0 + 4, 3.5, cardH - 8);
   let yy = cy0 + 6;
   rows.forEach((row) => {
-    ctx.fillStyle =
-      row.tone === "delay"
-        ? DELAY_RED
-        : "#ffffff";
-    ctx.font = fontOf(row.tone, row.text);
-    ctx.textAlign = "left";
-    ctx.fillText(row.text, cx0 + 10, yy);
+    if (row.text) {
+      ctx.fillStyle = row.tone === "delay" ? DELAY_RED : "#ffffff";
+      ctx.font = fontOf(row.tone, row.text);
+      ctx.textAlign = "left";
+      ctx.fillText(row.text, cx0 + 10, yy);
+    }
     if (row.extra) {
       ctx.font = extraFont;
-      ctx.fillStyle = row.extraAlert ? DELAY_RED : "#ffffff";
+      ctx.fillStyle = row.extraAlert ? DELAY_RED : "rgba(255,255,255,0.92)";
       ctx.textAlign = "right";
-      ctx.fillText(row.extra, cx0 + cardW - 8, yy + 2);
+      ctx.fillText(row.extra, cx0 + cardW - 8, yy);
       ctx.textAlign = "left";
     }
-    yy += rowH(row.tone);
+    yy += rowH(row);
   });
   ctx.restore();
 }

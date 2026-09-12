@@ -10,17 +10,15 @@ function ymdTokyo(at = new Date()) {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit", day: "2-digit" }).format(at);
 }
 
-function yahooName(name: string, pf: string) {
-  const n = name.replace(/駅$/u, "").trim();
-  const p = pf.trim();
-  return p ? `${n}(${p})` : n;
+function yahooName(name: string, _pf = "") {
+  return name.replace(/駅$/u, "").trim();
 }
 
 function shortPf(pf: string) {
   return pf.replace(/[都道府県]$/u, "").trim();
 }
 
-function nameForms(name: string, pf: string) {
+function nameForms(name: string, _pf = "") {
   const n = name.replace(/駅$/u, "").trim();
   const ke = n.replace(/ヶ/g, "ケ");
   const ge = n.replace(/ケ/g, "ヶ");
@@ -29,14 +27,48 @@ function nameForms(name: string, pf: string) {
     const v = x.trim();
     if (v && !out.includes(v)) out.push(v);
   };
-  add(yahooName(n, pf));
-  add(yahooName(n, shortPf(pf)));
   add(n);
-  add(yahooName(ke, pf));
+  add(`${n}駅`);
   add(ke);
-  add(yahooName(ge, pf));
   add(ge);
   return out.slice(0, 4);
+}
+
+function stopStem(s: string) {
+  let t = String(s || "").trim().split("/")[0]!.trim();
+  t = t.replace(/駅$/u, "").replace(/[（(][^）)]{1,12}[）)]$/u, "").replace(/駅$/u, "");
+  return t.trim();
+}
+
+function prefTag(s: string) {
+  const m = s.match(/[（(]([^）)]{1,12})[）)]$/u);
+  return m ? m[1]!.replace(/[都道府県]$/u, "") : "";
+}
+
+function sameStop(a: string, b: string) {
+  return stopStem(a) === stopStem(b);
+}
+
+function stopMatches(stopName: string, want: RouteStop) {
+  if (!sameStop(stopName, want.name)) return false;
+  const tagged = prefTag(stopName);
+  const p = shortPf(want.prefecture || "");
+  if (tagged && p && tagged !== p) return false;
+  return true;
+}
+
+function journeysForStations(list: Journey[], origin: RouteStop, dest: RouteStop) {
+  return list.filter((j) => {
+    if (!j.legs.length) return false;
+    const first = j.legs[0]!;
+    const last = j.legs[j.legs.length - 1]!;
+    const rides = j.legs.filter((l) => l.kind === "ride");
+    if (!rides.length) return false;
+    const startOk = stopMatches(first.from.name, origin) || stopMatches(rides[0]!.from.name, origin);
+    const endOk = stopMatches(last.to.name, dest) || stopMatches(rides[rides.length - 1]!.to.name, dest);
+    if (first.kind === "walk" && (first.minutes ?? 0) >= 12 && !startOk) return false;
+    return startOk && endOk;
+  });
 }
 
 function parseHhmm(s: string | undefined) {
@@ -126,18 +158,18 @@ function stationLists(html: string): { fromList: St[]; toList: St[] } {
 function pickCode(list: St[], pf: string, name: string) {
   if (!list.length) return "";
   const p = shortPf(pf);
-  const n = name.replace(/駅$/u, "").trim();
+  const n = stopStem(name);
   const blob = (x: St) => `${x.name ?? ""}${x.label ?? ""}`;
-  const stem = (x: St) => (x.name ?? "").replace(/駅$/u, "").trim();
-  const exact = list.filter((x) => stem(x) === n || (x.label ?? "").replace(/駅$/u, "").trim() === n);
-  const pool = exact.length ? exact : list;
+  const stem = (x: St) => stopStem(x.name ?? "") || stopStem(x.label ?? "");
+  const exact = list.filter((x) => stem(x) === n);
+  if (!exact.length) return "";
   const hit =
-    pool.find((x) => p && blob(x).includes(p)) ??
-    pool.find((x) => pf && blob(x).includes(pf)) ??
-    pool.find((x) => stem(x) === n) ??
-    pool[0];
-  if (hit?.code) return `,,${hit.code}`;
-  return hit?.value && /,,\d/.test(hit.value) ? hit.value : "";
+    exact.find((x) => p && blob(x).includes(p)) ??
+    exact.find((x) => pf && blob(x).includes(pf)) ??
+    (exact.length === 1 ? exact[0] : undefined);
+  if (!hit) return "";
+  if (hit.code) return `,,${hit.code}`;
+  return hit.value && /,,\d/.test(hit.value) ? hit.value : "";
 }
 
 export const Route = createFileRoute("/api/transit")({
@@ -194,32 +226,37 @@ export const Route = createFileRoute("/api/transit")({
             pairs.push({ from: f, to: t, extra });
           };
           addPair(fromQ, toQ);
-          addPair(froms[1] ?? fromQ, tos[1] ?? toQ);
-          addPair(froms[2] ?? from.replace(/駅$/u, ""), tos[2] ?? to.replace(/駅$/u, ""));
+          addPair(froms[1] ?? `${fromQ}駅`, tos[1] ?? `${toQ}駅`);
+          addPair(froms[2] ?? fromQ, tos[2] ?? toQ);
+          let usedExtra: { flatlon?: string; tlatlon?: string } | undefined;
           for (const pair of pairs) {
             usedFrom = pair.from;
             usedTo = pair.to;
+            usedExtra = pair.extra;
             const page = await yahooPage(usedFrom, usedTo, y ?? "", mo ?? "", d ?? "", hh, mm, type, origin, dest, pair.extra);
-            first = page.journeys;
+            let rows = journeysForStations(page.journeys, origin, dest);
             const fc = pickCode(page.fromList, opf, from);
             const tc = pickCode(page.toList, dpf, to);
             if (fc || tc) {
-              const coded = await yahooPage(usedFrom, usedTo, y ?? "", mo ?? "", d ?? "", hh, mm, type, origin, dest, {
+              usedExtra = {
                 flatlon: fc || pair.extra?.flatlon,
                 tlatlon: tc || pair.extra?.tlatlon,
-              });
-              if (coded.journeys.length) first = coded.journeys;
+              };
+              const coded = await yahooPage(usedFrom, usedTo, y ?? "", mo ?? "", d ?? "", hh, mm, type, origin, dest, usedExtra);
+              const codedRows = journeysForStations(coded.journeys, origin, dest);
+              if (codedRows.length) rows = codedRows;
             }
+            first = rows;
             if (first.length) break;
           }
           if (type === "1" && first.length) {
             const last = parseHhmm(first[first.length - 1]?.departHhmm);
             if (last) {
               const n = bumpMinute(last.hh, last.mm, 1);
-              const extra = await yahooPage(usedFrom, usedTo, y ?? "", mo ?? "", d ?? "", n.hh, n.mm, "1", origin, dest);
+              const extra = await yahooPage(usedFrom, usedTo, y ?? "", mo ?? "", d ?? "", n.hh, n.mm, "1", origin, dest, usedExtra);
               if (extra.journeys.length) {
                 const seen = new Set(first.map(jid));
-                for (const j of extra.journeys) {
+                for (const j of journeysForStations(extra.journeys, origin, dest)) {
                   const id = jid(j);
                   if (seen.has(id)) continue;
                   seen.add(id);

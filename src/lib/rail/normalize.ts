@@ -228,14 +228,24 @@ export function searchStations(
     ranked.push({ hit, score: nameScore + lineScore, dist });
   }
   ranked.sort((a, b) => b.score - a.score || a.dist - b.dist);
+  const exactName = new Set(
+    [...fullNeedles].map((s) => s.replace(/駅$/u, "")).filter((s) => s.length >= 1),
+  );
+  const isExact = (hit: StationHit) => exactName.has(foldKey(hit.name.replace(/駅$/u, "")));
   const seen = new Set<string>();
   const out: StationHit[] = [];
-  for (const { hit } of ranked) {
+  const push = (hit: StationHit) => {
     const k = `${hit.name}|${hit.lng.toFixed(3)}|${hit.lat.toFixed(3)}`;
-    if (seen.has(k)) continue;
+    if (seen.has(k)) return;
     seen.add(k);
     out.push(hit);
-    if (out.length >= limit) break;
+  };
+  for (const { hit } of ranked) {
+    if (isExact(hit)) push(hit);
+  }
+  for (const { hit } of ranked) {
+    if (out.length >= Math.max(limit, 12)) break;
+    push(hit);
   }
   return out;
 }

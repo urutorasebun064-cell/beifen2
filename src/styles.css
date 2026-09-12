@@ -87,6 +87,14 @@
   border-radius: 2px;
 }
 
+.party-log {
+  min-height: 0;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
+  overscroll-behavior: contain;
+  overflow-anchor: none;
+}
+
 .rpg-slot {
   display: flex;
   min-height: 2.75rem;

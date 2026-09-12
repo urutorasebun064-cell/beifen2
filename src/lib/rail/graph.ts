@@ -690,6 +690,25 @@ export function resolveStationQuery(
   }
   const hub = hubNameFor(q);
   const hits = searchStations(index, hub ?? q, 16, near);
+  const qName = (hub ?? q).replace(/駅$/u, "");
+  const exact = hits.filter((h) => h.name.replace(/駅$/u, "") === qName);
+  if (exact.length) {
+    let best = exact[0]!;
+    if (near) {
+      let bestD = Infinity;
+      for (const h of exact) {
+        const dy = h.lat - near.lat;
+        const dx = (h.lng - near.lng) * 0.82;
+        const d = dy * dy + dx * dx;
+        if (d < bestD) {
+          bestD = d;
+          best = h;
+        }
+      }
+    }
+    const pinned = pinHit(exact, fallback) ?? best;
+    return { match: pinned, suggestions: hits };
+  }
   if (hits[0] && (hits[0].name === (hub ?? q) || hits[0].name.startsWith(hub ?? q) || (hub && hits[0].name === hub))) {
     const pinned = pinHit(hits, fallback) ?? hits[0]!;
     return { match: pinned, suggestions: hits };

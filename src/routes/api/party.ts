@@ -195,6 +195,17 @@ async function pingPush(room: Room, exceptId: string) {
         }
       }),
   );
+  if (!jobs.length) {
+    for (const p of partyPush.values()) {
+      if (p.uid === exceptId || !p.endpoint) continue;
+      if (p.room !== roomKey) continue;
+      jobs.push(
+        wp
+          .sendNotification({ endpoint: p.endpoint, keys: { p256dh: p.p256dh, auth: p.auth } }, payload, { TTL: 86400, urgency: "high" })
+          .catch(() => undefined),
+      );
+    }
+  }
   if (!jobs.length) return;
   await Promise.race([Promise.allSettled(jobs), new Promise((r) => setTimeout(r, 8000))]);
 }
@@ -310,7 +321,7 @@ function parseGtx(data: unknown): { text: string; sl: string } {
 async function translateOne(text: string, lang: string) {
   const src = text.slice(0, 160);
   if (!src) return "";
-  const key = `v3:${lang}:${src}`;
+  const key = `v4:${lang}:${src}`;
   const hit = chatTr.get(key);
   if (hit && !badTr(hit) && hit !== "__miss__") return hit;
   const tl = gtxLang(lang);
@@ -319,6 +330,7 @@ async function translateOne(text: string, lang: string) {
     return src;
   }
   let out = "";
+  const tlShort = tl === "zh-CN" ? "zh" : tl;
   const urls = [
     `https://clients5.google.com/translate_a/t?client=dict-chrome-ex&sl=auto&tl=${encodeURIComponent(tl)}&q=${encodeURIComponent(src)}`,
     `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=${encodeURIComponent(tl)}&dt=t&q=${encodeURIComponent(src)}`,
@@ -327,19 +339,34 @@ async function translateOne(text: string, lang: string) {
     try {
       const res = await fetch(url, {
         headers: { Accept: "application/json", "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36" },
-        signal: AbortSignal.timeout(8000),
+        signal: AbortSignal.timeout(7000),
       });
       if (!res.ok) continue;
       const ctype = res.headers.get("content-type") || "";
       const raw = await res.text();
       if (!raw || ctype.includes("text/html")) continue;
       const parsed = parseGtx(JSON.parse(raw) as unknown);
-      if (parsed.text && !badTr(parsed.text)) {
+      if (parsed.text && !badTr(parsed.text) && parsed.text !== src) {
         out = parsed.text;
         break;
       }
+      if (parsed.text && !badTr(parsed.text)) out = parsed.text;
     } catch {
-      out = "";
+      /* next */
+    }
+  }
+  if (!out.trim() || badTr(out) || out === src) {
+    try {
+      const res = await fetch(`https://lingva.ml/api/v1/auto/${encodeURIComponent(tlShort)}/${encodeURIComponent(src)}`, {
+        signal: AbortSignal.timeout(7000),
+      });
+      if (res.ok) {
+        const data = (await res.json()) as { translation?: string };
+        const textOut = String(data.translation ?? "").trim();
+        if (textOut && !badTr(textOut)) out = textOut;
+      }
+    } catch {
+      /* */
     }
   }
   if (!out.trim() || badTr(out)) return src;
@@ -1300,30 +1327,34 @@ export const Route = createFileRoute("/api/party")({
           const auth = String(body.auth ?? "").trim().slice(0, 80);
           if (!endpoint.startsWith("http") || !p256dh || !auth) return json({ ok: false, error: "need" }, 400);
           me.push = { endpoint, p256dh, auth };
-          await rememberPush(found.key, me.id, me.push);
+          await rememberPush(keyOf(room.name), me.id, me.push);
+          if (found.key !== keyOf(room.name)) await rememberPush(found.key, me.id, me.push);
           await saveRoom(found.key, room);
           return json({ ok: true, vapid: await vapidOut(), ...publicOf(room, me.id, was), you: me.nick, youId: me.id, host: me.id === room.hostId });
         }
         if (action === "send") {
           if (!text) return json({ ok: false, error: "need" }, 400);
-          let tr: { ja?: string; en?: string; zh?: string } | undefined;
-          try {
-            const [ja, en, zh] = await Promise.all([translateOne(text, "ja"), translateOne(text, "en"), translateOne(text, "zh")]);
-            tr = { ja, en, zh };
-          } catch {
-            tr = undefined;
-          }
-          room.messages.push({
+          const msg: Msg = {
             id: room.msgId++,
             nick: me.nick,
             body: text,
             at: new Date().toISOString(),
             uid: me.id,
-            ...(tr ? { tr } : {}),
-          });
+          };
+          room.messages.push(msg);
           trimMessages(room);
           bumpTtl(room);
           await saveRoom(found.key, room);
+          void (async () => {
+            try {
+              const [ja, en, zh] = await Promise.all([translateOne(text, "ja"), translateOne(text, "en"), translateOne(text, "zh")]);
+              const hit = room.messages.find((m) => m.id === msg.id);
+              if (hit) hit.tr = { ja, en, zh };
+              await saveRoom(found.key, room, false);
+            } catch {
+              /* */
+            }
+          })();
           try {
             await pingPush(room, me.id);
           } catch {

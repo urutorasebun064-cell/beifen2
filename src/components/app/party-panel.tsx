@@ -244,7 +244,8 @@ async function bindPush(room: string, token: string, vapid?: string) {
   try {
     if (Notification.permission === "default") await Notification.requestPermission();
     if (Notification.permission !== "granted") return false;
-    const reg = await navigator.serviceWorker.register("/sw.js?v=25", { scope: "/", updateViaCache: "none" });
+    await navigator.serviceWorker.register("/sw.js?v=26", { scope: "/", updateViaCache: "none" });
+    const reg = await navigator.serviceWorker.ready;
     await reg.update().catch(() => undefined);
     const key = url64(vapid);
     let sub = await reg.pushManager.getSubscription();
@@ -339,9 +340,9 @@ async function fillChatTr(bodies: string[], lang: Lang) {
 
 function shownChat(row: Msg, lang: Lang) {
   const fromTr = row.tr?.[lang];
-  if (fromTr && !badTr(fromTr)) return fromTr;
+  if (fromTr && !badTr(fromTr) && fromTr !== row.body) return fromTr;
   const hit = trCache.get(`${lang}\t${row.body}`) ?? trCache.get(`${lang}\t${row.body.trim()}`);
-  if (!hit || badTr(hit)) return row.body;
+  if (!hit || badTr(hit) || hit === row.body) return row.body;
   return hit;
 }
 
@@ -809,14 +810,21 @@ export function PartyWindow() {
         void bindPush(joinedRef.current, tokenRef.current, vapidRef.current);
       }
     };
+    const onHide = () => {
+      if (joinedRef.current && tokenRef.current && vapidRef.current) {
+        void bindPush(joinedRef.current, tokenRef.current, vapidRef.current);
+      }
+    };
     document.addEventListener("visibilitychange", onShow);
     window.addEventListener("pageshow", onShow);
+    window.addEventListener("pagehide", onHide);
     window.addEventListener("focus", onShow);
     return () => {
       live = false;
       window.clearInterval(id);
       document.removeEventListener("visibilitychange", onShow);
       window.removeEventListener("pageshow", onShow);
+      window.removeEventListener("pagehide", onHide);
       window.removeEventListener("focus", onShow);
     };
   }, [joined, token, lang, t.partyFull]);
@@ -830,7 +838,7 @@ export function PartyWindow() {
     const el = logRef.current;
     if (!el) return;
     el.scrollTop = el.scrollHeight;
-  }, [open, collapsed, joined, state?.messages.length, pending.length]);
+  }, [open, collapsed, joined, state?.messages.at(-1)?.id, pending.length]);
 
   const sawOpenRef = useRef(false);
   useEffect(() => {
@@ -858,12 +866,23 @@ export function PartyWindow() {
     useMapStore.getState().setPartyPins(rows);
   }, [state?.members, joined, nick]);
 
-  const chatBodies = `${(state?.messages ?? []).map((m) => `${m.id}:${m.body}`).join("|")}|${pending.map((m) => m.body).join("|")}`;
+  const chatBodies = `${(state?.messages ?? []).map((m) => `${m.id}:${m.body}:${m.tr?.[lang] ?? ""}`).join("|")}|${pending.map((m) => m.body).join("|")}`;
   useEffect(() => {
     if (!joined) return;
+    let changed = false;
+    for (const m of state?.messages ?? []) {
+      const v = m.tr?.[lang];
+      if (v && v !== m.body && !badTr(v)) {
+        const k = `${lang}\t${m.body}`;
+        if (trCache.get(k) !== v) {
+          trCache.set(k, v);
+          changed = true;
+        }
+      }
+    }
     const bodies = [...(state?.messages ?? []).map((m) => m.body), ...pending.map((m) => m.body)];
-    void fillChatTr(bodies, lang).then((changed) => {
-      if (changed) setTrTick((n) => n + 1);
+    void fillChatTr(bodies, lang).then((g) => {
+      if (g || changed) setTrTick((n) => n + 1);
     });
   }, [joined, lang, chatBodies]);
 
@@ -1266,23 +1285,25 @@ export function PartyWindow() {
                 })}
               </div>
             </div>
-            <div
-              ref={logRef}
-              data-tr={trTick}
-              className="min-h-0 flex-1 overflow-y-scroll overscroll-contain px-3 py-2"
-              style={{ WebkitOverflowScrolling: "touch", touchAction: "pan-y" }}
-              onWheel={(e) => e.stopPropagation()}
-              onTouchMove={() => {
-                const el = logRef.current;
-                if (!el) return;
-                stickRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
-              }}
-              onScroll={() => {
-                const el = logRef.current;
-                if (!el) return;
-                stickRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
-              }}
-            >
+            <div className="relative min-h-0 flex-1 overflow-hidden">
+              <div
+                ref={logRef}
+                data-tr={trTick}
+                className="absolute inset-0 overflow-y-auto overscroll-contain px-3 py-2"
+                style={{ WebkitOverflowScrolling: "touch", touchAction: "pan-y", overflowAnchor: "none" }}
+                onPointerDownCapture={(e) => e.stopPropagation()}
+                onTouchStartCapture={(e) => {
+                  e.stopPropagation();
+                  stickRef.current = false;
+                }}
+                onTouchMoveCapture={(e) => e.stopPropagation()}
+                onWheel={(e) => e.stopPropagation()}
+                onScroll={() => {
+                  const el = logRef.current;
+                  if (!el) return;
+                  stickRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+                }}
+              >
               {messages.length ? (
                 <div className="flex flex-col gap-2">
                   {messages.map((row) => {
@@ -1300,6 +1321,7 @@ export function PartyWindow() {
               ) : (
                 <p className="py-6 text-center text-xs text-fg-muted">{t.partyEmpty}</p>
               )}
+              </div>
             </div>
             <form onSubmit={(e) => void send(e)} className="flex shrink-0 flex-col gap-2 border-t-2 border-fg p-3">
               <div className="flex gap-2">

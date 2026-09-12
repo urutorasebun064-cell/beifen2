@@ -92,6 +92,8 @@ async function yahooPage(
     shin: "1",
     ex: "1",
     hb: "1",
+    lb: "1",
+    sr: "1",
   });
   if (extra?.flatlon) qs.set("flatlon", extra.flatlon);
   if (extra?.tlatlon) qs.set("tlatlon", extra.tlatlon);
@@ -100,7 +102,7 @@ async function yahooPage(
       "User-Agent": "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/120.0.0.0 Mobile Safari/537.36",
       "Accept-Language": "ja",
     },
-    signal: AbortSignal.timeout(10000),
+    signal: AbortSignal.timeout(18000),
   });
   if (!res.ok) return { journeys: [], fromList: [], toList: [] };
   const html = await res.text();
@@ -126,11 +128,14 @@ function pickCode(list: St[], pf: string, name: string) {
   const p = shortPf(pf);
   const n = name.replace(/駅$/u, "").trim();
   const blob = (x: St) => `${x.name ?? ""}${x.label ?? ""}`;
+  const stem = (x: St) => (x.name ?? "").replace(/駅$/u, "").trim();
+  const exact = list.filter((x) => stem(x) === n || (x.label ?? "").replace(/駅$/u, "").trim() === n);
+  const pool = exact.length ? exact : list;
   const hit =
-    list.find((x) => p && blob(x).includes(p)) ??
-    list.find((x) => pf && blob(x).includes(pf)) ??
-    list.find((x) => (x.name ?? "").replace(/駅$/u, "") === n) ??
-    list.find((x) => x.code);
+    pool.find((x) => p && blob(x).includes(p)) ??
+    pool.find((x) => pf && blob(x).includes(pf)) ??
+    pool.find((x) => stem(x) === n) ??
+    pool[0];
   if (hit?.code) return `,,${hit.code}`;
   return hit?.value && /,,\d/.test(hit.value) ? hit.value : "";
 }
@@ -196,23 +201,20 @@ export const Route = createFileRoute("/api/transit")({
             usedTo = pair.to;
             const page = await yahooPage(usedFrom, usedTo, y ?? "", mo ?? "", d ?? "", hh, mm, type, origin, dest, pair.extra);
             first = page.journeys;
-            if (first.length) break;
             const fc = pickCode(page.fromList, opf, from);
             const tc = pickCode(page.toList, dpf, to);
             if (fc || tc) {
               const coded = await yahooPage(usedFrom, usedTo, y ?? "", mo ?? "", d ?? "", hh, mm, type, origin, dest, {
-                flatlon: fc || undefined,
-                tlatlon: tc || undefined,
+                flatlon: fc || pair.extra?.flatlon,
+                tlatlon: tc || pair.extra?.tlatlon,
               });
-              if (coded.journeys.length) {
-                first = coded.journeys;
-                break;
-              }
+              if (coded.journeys.length) first = coded.journeys;
             }
+            if (first.length) break;
           }
           if (type === "1" && first.length) {
             const last = parseHhmm(first[first.length - 1]?.departHhmm);
-            if (last && first.length < 5) {
+            if (last) {
               const n = bumpMinute(last.hh, last.mm, 1);
               const extra = await yahooPage(usedFrom, usedTo, y ?? "", mo ?? "", d ?? "", n.hh, n.mm, "1", origin, dest);
               if (extra.journeys.length) {
@@ -227,7 +229,7 @@ export const Route = createFileRoute("/api/transit")({
             }
           }
           const dia = await diaP.catch(() => []);
-          const journeys = first.slice(0, 6).map((j) => stampYahooDia(j, dia));
+          const journeys = first.slice(0, 12).map((j) => stampYahooDia(j, dia));
           if (journeys.length) cache.set(cacheId, { at: Date.now(), journey: journeys[0], journeys });
           return Response.json({ ok: true, journey: journeys[0] ?? null, journeys });
         } catch {

@@ -1359,6 +1359,20 @@ function airGlowPath(fromName: string, toName: string, from: { lng: number; lat:
   return out;
 }
 
+function pathFitsLeg(pts: [number, number][], from: { lng: number; lat: number }, to: { lng: number; lat: number }) {
+  if (pts.length < 2) return false;
+  const hop = haversine([from.lng, from.lat], [to.lng, to.lat]);
+  const len = pathLenKm(pts);
+  if (len > hop * 2.6 + 18) return false;
+  const a = pts[0]!;
+  const b = pts[pts.length - 1]!;
+  const ends = Math.min(
+    haversine(a, [from.lng, from.lat]) + haversine(b, [to.lng, to.lat]),
+    haversine(a, [to.lng, to.lat]) + haversine(b, [from.lng, from.lat]),
+  );
+  return ends < Math.max(5, hop * 0.22);
+}
+
 function slimPath(pts: [number, number][]) {
   if (pts.length <= 140) return pts;
   const step = Math.ceil(pts.length / 120);
@@ -1443,35 +1457,29 @@ function remainingJourneySegs(lines: LineRuntime[]) {
     } else {
       const hop = haversine([fromPt.lng, fromPt.lat], [toPt.lng, toPt.lat]);
       const hinted = { ...leg, from: fromPt, to: toPt };
-      line = findLineForLeg(lines, index, hinted);
-      pts = rideGlowPath(line, fromPt.name, toPt.name);
-      if (pts.length < 2 && line) {
-        const sliced = sliceRailPath(line, fromPt, toPt);
-        if (sliced.length >= 2) pts = sliced;
-      }
-      if (pts.length < 3 && leg.path && leg.path.length >= 3) pts = leg.path.slice();
-      if (pts.length < 3) {
-        const along = chainRailPath(fromPt.name, toPt.name, lines, leg.lineName ?? "");
-        if (along.length >= 3) pts = along;
-      }
-      if (pts.length < 3) {
+      const named = lineWithBoth(lines, fromPt.name, toPt.name, leg.lineName ?? "");
+      line = named ?? pickRideLine(lines, index, hinted, fromPt, toPt);
+      const take = (next: [number, number][], nextLine?: LineRuntime | null) => {
+        if (!pathFitsLeg(next, fromPt, toPt)) return false;
+        pts = next;
+        if (nextLine) line = nextLine;
+        return true;
+      };
+      take(rideGlowPath(line, fromPt.name, toPt.name), line);
+      if (pts.length < 2 && line) take(sliceRailPath(line, fromPt, toPt), line);
+      if (pts.length < 2 && named) take(rideGlowPath(named, fromPt.name, toPt.name), named);
+      if (pts.length < 2 && leg.path && leg.path.length >= 2) take(leg.path.slice());
+      if (pts.length < 2) take(chainRailPath(fromPt.name, toPt.name, lines, leg.lineName ?? "", fromPt, toPt));
+      if (pts.length < 2) {
         const dense = densifyRailPath(fromPt, toPt, lines, index, hinted);
-        if (dense.path.length >= 3) {
-          pts = dense.path;
-          if (dense.line) line = dense.line;
-        }
+        take(dense.path, dense.line);
       }
-      if (pts.length < 3) {
-        const routed = pathForRide(fromPt, toPt, lines, index, hinted);
-        if (routed.path.length >= 3) {
-          pts = routed.path;
-          if (routed.line) line = routed.line;
+      if (pts.length < 2 && named) {
+        const keep = rideGlowPath(named, fromPt.name, toPt.name);
+        if (keep.length >= 2 && pathLenKm(keep) <= hop * 4 + 30) {
+          pts = keep;
+          line = named;
         }
-      }
-      if (pts.length < 2 && hop > 80) {
-        const a = airportOf(leg.from.name);
-        const b = airportOf(leg.to.name);
-        if (a && b && a.id !== b.id) pts = airGlowPath(leg.from.name, leg.to.name, fromPt, toPt);
       }
     }
     if (pts.length < 2) continue;

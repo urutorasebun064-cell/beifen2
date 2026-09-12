@@ -32,7 +32,7 @@ export const Route = createRootRoute({
       <head>
         <script
           dangerouslySetInnerHTML={{
-            __html: `(function(){try{if(navigator.serviceWorker){navigator.serviceWorker.register("/sw.js?v=25",{scope:"/"}).catch(function(){});}}catch(e){}function ping(){try{if(window.parent&&window.parent!==window){window.parent.postMessage({channel:"grok-preview-bridge",version:1,type:"ready"},"*");}}catch(e){}}ping();[0,50,200,500,1000,2000,4000,8000].forEach(function(ms){setTimeout(ping,ms);});})();`,
+            __html: `(function(){try{if(navigator.serviceWorker){navigator.serviceWorker.register("/sw.js?v=26",{scope:"/"}).catch(function(){});}}catch(e){}function ping(){try{if(window.parent&&window.parent!==window){window.parent.postMessage({channel:"grok-preview-bridge",version:1,type:"ready"},"*");}}catch(e){}}ping();[0,50,200,500,1000,2000,4000,8000].forEach(function(ms){setTimeout(ping,ms);});})();`,
           }}
         />
         <HeadContent />

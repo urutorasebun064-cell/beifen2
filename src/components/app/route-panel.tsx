@@ -472,7 +472,7 @@ export function RoutePanel({ journey }: { journey: Journey }) {
 
   return (
     <section>
-      <ul className="max-h-[11.25rem] overflow-y-auto overscroll-contain">
+      <ul className="max-h-[11.25rem] overflow-y-auto overscroll-contain touch-pan-y [-webkit-overflow-scrolling:touch]">
         {list.map((j, i) => {
           const shown = stampJourneyDelay(j, liveTrains);
           const active = journeys.length > 1 ? journeys.indexOf(j) === journeyIndex : true;

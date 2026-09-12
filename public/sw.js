@@ -1,5 +1,5 @@
 /* J PWA — never hijack navigations or scripts. Old interceptors caused a black screen. */
-const SW_VER = "j-v27";
+const SW_VER = "j-v28";
 const TILES = "jb-tiles-v1";
 const STATIC = "jb-static-v1";
 
@@ -93,8 +93,6 @@ self.addEventListener("push", (event) => {
       } catch {
         /* */
       }
-      const open = list.some((c) => c.visibilityState === "visible");
-      if (open) return;
       await self.registration.showNotification("J", {
         body,
         tag: "jb-party-" + Date.now(),

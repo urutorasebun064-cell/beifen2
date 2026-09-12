@@ -244,7 +244,7 @@ async function bindPush(room: string, token: string, vapid?: string) {
   try {
     if (Notification.permission === "default") await Notification.requestPermission();
     if (Notification.permission !== "granted") return false;
-    await navigator.serviceWorker.register("/sw.js?v=27", { scope: "/", updateViaCache: "none" });
+    await navigator.serviceWorker.register("/sw.js?v=28", { scope: "/", updateViaCache: "none" });
     const reg = await navigator.serviceWorker.ready;
     await reg.update().catch(() => undefined);
     const key = url64(vapid);
@@ -592,7 +592,7 @@ export function PartyWindow() {
       msgsRef.current = [...map.values()].sort((a, b) => a.id - b.id);
     }
     const incoming = data.members ?? [];
-    if (incoming.length) memsRef.current = incoming;
+    memsRef.current = incoming;
     return { ...data, messages: msgsRef.current, members: memsRef.current };
   };
 
@@ -606,7 +606,10 @@ export function PartyWindow() {
       }
       if (e.data?.type === "party-alert") {
         const viewing = !useMapStore.getState().partyCollapsed && useMapStore.getState().partyMenuOpen && document.visibilityState === "visible";
-        if (viewing) return;
+        if (viewing) {
+          void navigator.serviceWorker?.ready.then((reg) => reg.getNotifications().then((ns) => ns.forEach((n) => n.close()))).catch(() => undefined);
+          return;
+        }
         markUnread();
         pingChat();
       }

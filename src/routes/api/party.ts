@@ -128,6 +128,19 @@ async function rememberPush(roomKey: string, uid: string, sub: PushSub) {
   }
 }
 
+async function forgetPush(roomKey: string, uid: string) {
+  if (!roomKey || !uid) return;
+  for (const [k, p] of [...partyPush.entries()]) {
+    if (p.room === roomKey && (p.uid === uid || k.endsWith(`:${uid}`))) partyPush.delete(k);
+  }
+  try {
+    const sql = await getSql();
+    await sql.query("delete from party_push where room = $1 and uid = $2", [roomKey, uid]);
+  } catch {
+    /* */
+  }
+}
+
 async function listPushes(roomKey: string) {
   const out: { uid: string; endpoint: string; p256dh: string; auth: string }[] = [];
   for (const p of partyPush.values()) {
@@ -544,42 +557,39 @@ function mergeRoom(key: string, incoming: Room) {
   if (next.expiresAt && next.expiresAt > (cur.expiresAt || 0)) cur.expiresAt = next.expiresAt;
   const nextRev = Number(next.memRev) || 0;
   const curRev = Number(cur.memRev) || 0;
-  if (nextRev > curRev) {
+  if (nextRev >= curRev) {
     cur.members = next.members.slice();
     cur.memRev = nextRev;
     if (next.hostId) cur.hostId = next.hostId;
   } else {
-  for (const m of next.members) {
-    const have = cur.members.find((x) => x.id === m.id || (m.token && x.token === m.token));
-    if (!have) {
-      cur.members.push(m);
-      continue;
+    for (const m of next.members) {
+      const have = cur.members.find((x) => x.id === m.id || (m.token && x.token === m.token));
+      if (!have) continue;
+      if ((m.last ?? 0) >= (have.last ?? 0)) {
+        have.last = m.last;
+        have.token = m.token || have.token;
+        have.nick = m.nick || have.nick;
+        have.online = m.online;
+      }
+      have.id = have.id || m.id;
+      have.push = m.push || have.push;
+      const incomingPin = Number(m.pinAt) || 0;
+      const havePin = Number(have.pinAt) || 0;
+      if (incomingPin < havePin) continue;
+      if (Number.isFinite(m.lng) && Number.isFinite(m.lat) && !m.pinOff) {
+        have.lng = m.lng;
+        have.lat = m.lat;
+        have.pinAt = incomingPin;
+        have.pinOff = false;
+        if (m.near) have.near = m.near;
+      } else if (m.pinOff) {
+        have.lng = undefined;
+        have.lat = undefined;
+        have.near = undefined;
+        have.pinAt = incomingPin;
+        have.pinOff = true;
+      }
     }
-    if ((m.last ?? 0) >= (have.last ?? 0)) {
-      have.last = m.last;
-      have.token = m.token || have.token;
-      have.nick = m.nick || have.nick;
-      have.online = m.online;
-    }
-    have.id = have.id || m.id;
-    have.push = m.push || have.push;
-    const incomingPin = Number(m.pinAt) || 0;
-    const havePin = Number(have.pinAt) || 0;
-    if (incomingPin < havePin) continue;
-    if (Number.isFinite(m.lng) && Number.isFinite(m.lat) && !m.pinOff) {
-      have.lng = m.lng;
-      have.lat = m.lat;
-      have.pinAt = incomingPin;
-      have.pinOff = false;
-      if (m.near) have.near = m.near;
-    } else if (m.pinOff) {
-      have.lng = undefined;
-      have.lat = undefined;
-      have.near = undefined;
-      have.pinAt = incomingPin;
-      have.pinOff = true;
-    }
-  }
   }
   collapseMembers(cur);
   for (const m of cur.members) m.host = m.id === cur.hostId;
@@ -1300,6 +1310,12 @@ export const Route = createFileRoute("/api/party")({
           room.members = room.members.filter((m) => m.id !== me.id && m.token !== me.token && !(uid && m.id === uid));
           for (const m of room.members) m.host = m.id === room.hostId;
           room.memRev = (room.memRev || 0) + 1;
+          await forgetPush(found.key, me.id);
+          if (found.key !== keyOf(room.name)) await forgetPush(keyOf(room.name), me.id);
+          if (uid) {
+            await forgetPush(found.key, uid);
+            if (found.key !== keyOf(room.name)) await forgetPush(keyOf(room.name), uid);
+          }
           await saveRoom(found.key, room);
           return json({ ok: true });
         }

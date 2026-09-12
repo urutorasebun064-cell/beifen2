@@ -360,16 +360,9 @@ export async function applyTrip(origin: StationHit | { lng: number; lat: number 
       let yahoo = await pullYahoo("1", clock.hour, clock.minute);
       if (!yahoo.length) yahoo = await pullYahoo("1", clock.hour, clock.minute, true);
       let live = yahoo.filter(notPassed);
-      if (!live.length) live = yahoo.slice();
-      if (!live.length) {
-        const last = await pullYahoo("2");
-        live = last.filter(notPassed);
-        if (!live.length) live = last;
-      }
-      if (!live.length) {
+      if (!live.length && (nowMin >= 21 * 60 || nowMin < FIRST_MIN)) {
         const firsts = await pullYahoo("3", 4, 50);
         live = firsts.filter(notPassed);
-        if (!live.length) live = firsts;
       }
       if (live.length) journeys.push(...live);
     }
@@ -379,7 +372,6 @@ export async function applyTrip(origin: StationHit | { lng: number; lat: number 
     const stillDue = (j: Journey) => departDue(j.departHhmm, nowMin) + Math.max(0, j.delayMin ?? 0) >= 0;
     const store = useMapStore.getState();
     let live: Journey[] = journeys.filter(stillDue);
-    if (!live.length) live = journeys.slice();
     if (!live.length) {
       store.setJourneys([]);
       if (!silent) store.setSearching(false);

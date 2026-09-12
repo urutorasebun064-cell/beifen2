@@ -18,7 +18,7 @@ const FILE = join(process.cwd(), ".data", "party-rooms.json");
 const VAPID_FILE = join(process.cwd(), ".data", "party-vapid.json");
 
 type PushSub = { endpoint: string; p256dh: string; auth: string };
-type Member = { id: string; nick: string; token: string; last: number; online: boolean; host?: boolean; lng?: number; lat?: number; pinAt?: number; near?: string; push?: PushSub };
+type Member = { id: string; nick: string; token: string; last: number; online: boolean; host?: boolean; lng?: number; lat?: number; pinAt?: number; near?: string; pinOff?: boolean; push?: PushSub };
 type Msg = { id: number; nick: string; body: string; at: string; uid?: string };
 type Room = { name: string; pass: string; hostId: string; members: Member[]; messages: Msg[]; msgId: number; msgTotal: number; expiresAt: number; born?: number; boundNicks?: Record<string, string> };
 type Saved = Room & { key: string };
@@ -255,6 +255,7 @@ function asMember(raw: Partial<Member> & { uid?: string }): Member | null {
     lat: Number.isFinite(Number(raw.lat)) ? Number(raw.lat) : undefined,
     pinAt: Number(raw.pinAt) || undefined,
     near: String(raw.near ?? "").trim().slice(0, 20) || undefined,
+    pinOff: Boolean(raw.pinOff),
     push:
       raw.push && String(raw.push.endpoint || "").startsWith("http")
         ? {
@@ -313,18 +314,19 @@ function mergeRoom(key: string, incoming: Room) {
     have.push = m.push || have.push;
     const incomingPin = Number(m.pinAt) || 0;
     const havePin = Number(have.pinAt) || 0;
-    if (incomingPin >= havePin) {
-      if (Number.isFinite(m.lng) && Number.isFinite(m.lat)) {
-        have.lng = m.lng;
-        have.lat = m.lat;
-        have.pinAt = incomingPin;
-        if (m.near) have.near = m.near;
-      } else if (incomingPin > 0) {
-        have.lng = undefined;
-        have.lat = undefined;
-        have.near = undefined;
-        have.pinAt = incomingPin;
-      }
+    if (incomingPin < havePin) continue;
+    if (Number.isFinite(m.lng) && Number.isFinite(m.lat) && !m.pinOff) {
+      have.lng = m.lng;
+      have.lat = m.lat;
+      have.pinAt = incomingPin;
+      have.pinOff = false;
+      if (m.near) have.near = m.near;
+    } else if (m.pinOff) {
+      have.lng = undefined;
+      have.lat = undefined;
+      have.near = undefined;
+      have.pinAt = incomingPin;
+      have.pinOff = true;
     }
   }
   collapseMembers(cur);
@@ -769,9 +771,33 @@ function nickTaken(room: Room, nick: string, exceptId?: string) {
   });
 }
 
+function keepPin(dst: Member, src: Member) {
+  if (src.pinOff) {
+    if ((Number(src.pinAt) || 0) >= (Number(dst.pinAt) || 0)) {
+      dst.lng = undefined;
+      dst.lat = undefined;
+      dst.near = undefined;
+      dst.pinAt = src.pinAt;
+      dst.pinOff = true;
+    }
+    return;
+  }
+  if (!Number.isFinite(src.lng) || !Number.isFinite(src.lat) || dst.pinOff) return;
+  if (!Number.isFinite(dst.lng) || (Number(src.pinAt) || 0) >= (Number(dst.pinAt) || 0)) {
+    dst.lng = src.lng;
+    dst.lat = src.lat;
+    dst.near = src.near || dst.near;
+    dst.pinAt = Math.max(Number(dst.pinAt) || 0, Number(src.pinAt) || 0);
+  }
+}
+
 function dropOldSelf(room: Room, keep: Member, uid: string, token: string, was: string) {
   const fold = hanFold(keep.nick || "");
   const old = new Set(wasNicks(was).map((n) => hanFold(n)).filter(Boolean));
+  for (const m of room.members) {
+    if (m === keep) continue;
+    if ((uid && m.id === uid) || (token && m.token && m.token === token)) keepPin(keep, m);
+  }
   room.members = room.members.filter((m) => {
     if (m === keep) return true;
     if (uid && m.id === uid) return false;
@@ -797,8 +823,7 @@ async function kickFromOthers(uid: string, token: string, keepKey: string) {
     if (!hit) continue;
     r.members = r.members.filter((m) => !(uid && m.id === uid) && !(token && m.token && m.token === token));
     for (const m of r.members) m.host = m.id === r.hostId;
-    if (!r.members.length) await dropRoom(k);
-    else await saveRoom(k, r);
+    await saveRoom(k, r);
   }
 }
 
@@ -885,10 +910,6 @@ export const Route = createFileRoute("/api/party")({
               if (stillGone(k) || expired(r)) return false;
               collapseMembers(r);
               markAway(r);
-              if (!r.members.length) {
-                void dropRoom(k);
-                return false;
-              }
               return true;
             })
             .map(([, r]) => r)
@@ -1011,8 +1032,7 @@ export const Route = createFileRoute("/api/party")({
         if (action === "leave") {
           room.members = room.members.filter((m) => m.id !== me.id && m.token !== me.token && !(uid && m.id === uid));
           for (const m of room.members) m.host = m.id === room.hostId;
-          if (!room.members.length) await dropRoom(found.key);
-          else await saveRoom(found.key, room);
+          await saveRoom(found.key, room);
           return json({ ok: true });
         }
         me.last = Date.now();
@@ -1064,6 +1084,7 @@ export const Route = createFileRoute("/api/party")({
           me.lng = lng;
           me.lat = lat;
           me.pinAt = Date.now();
+          me.pinOff = false;
           me.near = String(body.near ?? "").trim().slice(0, 20) || undefined;
           await saveRoom(found.key, room);
           return json({ ok: true, ...publicOf(room, me.id, was), you: me.nick, youId: me.id, host: me.id === room.hostId });
@@ -1072,6 +1093,7 @@ export const Route = createFileRoute("/api/party")({
           me.lng = undefined;
           me.lat = undefined;
           me.near = undefined;
+          me.pinOff = true;
           me.pinAt = Date.now();
           await saveRoom(found.key, room);
           return json({ ok: true, ...publicOf(room, me.id, was), you: me.nick, youId: me.id, host: me.id === room.hostId });

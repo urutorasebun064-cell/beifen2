@@ -457,6 +457,7 @@ export function PartyWindow() {
   const pushBoundRef = useRef("");
   const vapidRef = useRef("");
   const shareOffRef = useRef(false);
+  const pinKeepRef = useRef<{ lng: number; lat: number; near?: string } | null>(null);
   passRef.current = pass;
   nickRef.current = nick;
   joinedRef.current = joined;
@@ -634,6 +635,24 @@ export function PartyWindow() {
             }
           }
           if (top) lastHeardRef.current = top;
+          if (!shareOffRef.current && pinKeepRef.current && Array.isArray(data.members)) {
+            const mine = userId();
+            const who = nickRef.current;
+            const keep = pinKeepRef.current;
+            data.members = data.members.map((m) =>
+              m.id === mine || m.nick === who
+                ? {
+                    ...m,
+                    lng: Number.isFinite(Number(m.lng)) ? m.lng : keep.lng,
+                    lat: Number.isFinite(Number(m.lat)) ? m.lat : keep.lat,
+                    near: m.near || keep.near,
+                  }
+                : m,
+            );
+            if (!data.members.some((m) => m.id === mine || m.nick === who)) {
+              data.members = data.members.concat([{ id: mine, nick: who, lng: keep.lng, lat: keep.lat, near: keep.near, online: true }]);
+            }
+          }
           if (shareOffRef.current && Array.isArray(data.members)) {
             const mine = userId();
             data.members = data.members.map((m) =>
@@ -668,6 +687,8 @@ export function PartyWindow() {
           useMapStore.getState().setPartyCollapsed(false);
           useMapStore.getState().setPartyPins([]);
           useMapStore.getState().selectMate(null);
+          pinKeepRef.current = null;
+          shareOffRef.current = false;
           return;
         }
         await resume();
@@ -731,14 +752,19 @@ export function PartyWindow() {
   }, [open]);
 
   useEffect(() => {
+    const mineId = state?.youId || userId();
     const rows = (state?.members ?? []).flatMap((m) => {
       const lng = Number(m.lng);
       const lat = Number(m.lat);
       if (!Number.isFinite(lng) || !Number.isFinite(lat) || !isInJapan(lng, lat)) return [];
-      return [{ id: m.id, nick: m.nick, lng, lat, station: m.near, mine: m.id === (state?.youId || "") }];
+      return [{ id: m.id, nick: m.nick, lng, lat, station: m.near, mine: m.id === mineId }];
     });
+    const keep = pinKeepRef.current;
+    if (keep && joined && !shareOffRef.current && isInJapan(keep.lng, keep.lat) && !rows.some((p) => p.mine)) {
+      rows.push({ id: mineId, nick: nickRef.current || nick, lng: keep.lng, lat: keep.lat, station: keep.near, mine: true });
+    }
     useMapStore.getState().setPartyPins(rows);
-  }, [state?.members]);
+  }, [state?.members, joined, nick]);
 
   if (!open) return null;
 
@@ -897,6 +923,8 @@ export function PartyWindow() {
     useMapStore.getState().setPartyCollapsed(false);
     useMapStore.getState().selectMate(null);
     useMapStore.getState().setMateWalk(false);
+    pinKeepRef.current = null;
+    shareOffRef.current = false;
     clearPartyBadge();
   };
 
@@ -917,6 +945,8 @@ export function PartyWindow() {
       useMapStore.getState().setPartyCollapsed(false);
       useMapStore.getState().selectMate(null);
       useMapStore.getState().setMateWalk(false);
+      pinKeepRef.current = null;
+      shareOffRef.current = false;
       clearPartyBadge();
       return;
     }
@@ -951,6 +981,7 @@ export function PartyWindow() {
             });
             if (res.ok && data.ok) {
               shareOffRef.current = false;
+              pinKeepRef.current = { lng, lat, near: near || undefined };
               setState(data);
               useMapStore.getState().setPartyCollapsed(true);
               if (isInJapan(lng, lat)) {
@@ -989,6 +1020,7 @@ export function PartyWindow() {
     });
     if (res.ok && data.ok) {
       shareOffRef.current = true;
+      pinKeepRef.current = null;
       const mine = userId();
       if (Array.isArray(data.members)) {
         data.members = data.members.map((m) =>

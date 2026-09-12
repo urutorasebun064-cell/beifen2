@@ -14,35 +14,38 @@ type Msg = { id: number; nick: string; body: string; at: string; uid?: string };
 type RoomState = { name: string; members: Member[]; messages: Msg[]; seats: number; you?: string; youId?: string; host?: boolean; hostId?: string; expiresAt?: number; vapid?: string; cleared?: number };
 
 function foldMembers(list: Member[], meId: string, you: string) {
-  const me = you.trim();
-  const aliases = new Set(
-    myNicks()
-      .concat(you)
-      .concat(["ゲスト", "旅人", "Traveler"])
-      .map((s) => s.trim())
-      .filter(Boolean),
-  );
   const best = new Map<string, Member>();
   for (const m of list) {
-    const k = (m.nick || m.id || "").trim();
+    const id = (m.id || "").trim();
+    const nick = (m.nick || "").trim();
+    const k = id || nick;
     if (!k) continue;
     const prev = best.get(k);
     if (!prev) {
       best.set(k, m);
       continue;
     }
-    const score = (x: Member) => (x.id === meId || x.nick === you ? 8 : 0) + (x.online === true ? 2 : 0);
-    if (score(m) >= score(prev)) best.set(k, m);
+    const score = (x: Member) => (x.id === meId || x.nick === you ? 8 : 0) + (x.online === true ? 2 : 0) + (Number.isFinite(x.lng) ? 1 : 0);
+    if (score(m) >= score(prev)) {
+      best.set(k, {
+        ...prev,
+        ...m,
+        nick: m.nick || prev.nick,
+        lng: Number.isFinite(m.lng) ? m.lng : prev.lng,
+        lat: Number.isFinite(m.lat) ? m.lat : prev.lat,
+        near: m.near || prev.near,
+      });
+    }
   }
-  const renamed = Boolean(me && !["ゲスト", "旅人", "Traveler"].includes(me));
-  return [...best.values()].filter((m) => {
-    if (m.id === meId || (m.nick || "").trim() === me) return true;
+  const seenNick = new Set<string>();
+  const out: Member[] = [];
+  for (const m of best.values()) {
     const nick = (m.nick || "").trim();
-    const away = m.online !== true;
-    if (away && aliases.has(nick)) return false;
-    if (renamed && away && (nick === "ゲスト" || nick === "旅人" || nick === "Traveler")) return false;
-    return true;
-  });
+    if (nick && seenNick.has(nick) && m.id !== meId) continue;
+    if (nick) seenNick.add(nick);
+    out.push(m);
+  }
+  return out;
 }
 
 function myNicks(): string[] {
@@ -241,7 +244,8 @@ async function bindPush(room: string, token: string, vapid?: string) {
   try {
     if (Notification.permission === "default") await Notification.requestPermission();
     if (Notification.permission !== "granted") return false;
-    const reg = await navigator.serviceWorker.ready;
+    const reg = await navigator.serviceWorker.register("/sw.js?v=22", { scope: "/", updateViaCache: "none" });
+    await reg.update().catch(() => undefined);
     const key = url64(vapid);
     let sub = await reg.pushManager.getSubscription();
     try {
@@ -267,13 +271,17 @@ async function bindPush(room: string, token: string, vapid?: string) {
 }
 
 const trCache = new Map<string, string>();
-const trFail = new Set<string>();
 
 function guessChatLang(s: string): Lang | "" {
   if (/[\u3040-\u30ff]/u.test(s)) return "ja";
   if (/[A-Za-z]/.test(s) && !/[\u3040-\u9fff]/u.test(s)) return "en";
   if (/[\u4e00-\u9fff]/u.test(s)) return "zh";
   return "";
+}
+
+function badTr(s: string) {
+  const u = s.toUpperCase();
+  return u.includes("INVALID SOURCE LANGUAGE") || u.includes("LANGPAIR=") || u.includes("MYMEMORY WARNING") || u.includes("PLEASE SELECT TWO DISTINCT");
 }
 
 function sameChatLang(s: string, lang: Lang) {
@@ -288,11 +296,9 @@ async function fillChatTr(bodies: string[], lang: Lang) {
   const need: string[] = [];
   for (const b of uniq) {
     const k = `${lang}\t${b}`;
-    if (trCache.has(k)) continue;
-    if (sameChatLang(b, lang)) {
-      trCache.set(k, b);
-      continue;
-    }
+    const cached = trCache.get(k);
+    if (cached && !badTr(cached)) continue;
+    if (cached && badTr(cached)) trCache.delete(k);
     need.push(b);
   }
   if (!need.length) return false;
@@ -307,41 +313,22 @@ async function fillChatTr(bodies: string[], lang: Lang) {
     if (data.map) {
       for (const [src, dst] of Object.entries(data.map)) {
         const out = (dst || "").trim();
-        if (out) {
+        if (out && !badTr(out)) {
           trCache.set(`${lang}\t${src}`, out);
           got = true;
         }
       }
     }
   } catch {
-    /* try below */
-  }
-  const still = need.filter((b) => !trCache.has(`${lang}\t${b}`));
-  for (const b of still.slice(0, 12)) {
-    const k = `${lang}\t${b}`;
-    if (trFail.has(k)) continue;
-    try {
-      const tl = lang === "zh" ? "zh-CN" : lang;
-      const res = await fetch(
-        `https://api.mymemory.translated.net/get?q=${encodeURIComponent(b.slice(0, 160))}&langpair=aut|${tl}`,
-      );
-      const data = (await res.json()) as { responseData?: { translatedText?: string } };
-      const out = String(data.responseData?.translatedText ?? "").trim();
-      if (out) {
-        trCache.set(k, out);
-        got = true;
-      } else {
-        trFail.add(k);
-      }
-    } catch {
-      trFail.add(k);
-    }
+    /* keep original until next poll */
   }
   return got;
 }
 
 function shownChat(body: string, lang: Lang) {
-  return trCache.get(`${lang}\t${body}`) ?? body;
+  const hit = trCache.get(`${lang}\t${body}`) ?? trCache.get(`${lang}\t${body.trim()}`);
+  if (!hit || badTr(hit)) return body;
+  return hit;
 }
 
 async function partyPost(body: Record<string, string>) {
@@ -465,6 +452,7 @@ export function PartyButton() {
       type="button"
       className={`jb-chip relative inline-flex min-h-36 w-11 items-center justify-center overflow-visible rounded-[var(--radius-md)] bg-surface/94 py-3 text-xs font-medium shadow-[var(--shadow-border)] backdrop-blur-md [writing-mode:vertical-rl] ${open || inRoom ? "text-accent" : "text-fg"} ${lang === "zh" ? "tracking-normal" : "tracking-[0.18em]"}`}
       onClick={() => {
+        unlockPing();
         const s = useMapStore.getState();
         if (s.partyInRoom) {
           if (s.partyCollapsed || !s.partyMenuOpen) {
@@ -539,6 +527,7 @@ export function PartyWindow() {
   const pinKeepRef = useRef<{ lng: number; lat: number; near?: string } | null>(null);
   const clearedRef = useRef(0);
   const msgsRef = useRef<Msg[]>([]);
+  const memsRef = useRef<Member[]>([]);
   passRef.current = pass;
   nickRef.current = nick;
   joinedRef.current = joined;
@@ -549,13 +538,16 @@ export function PartyWindow() {
     if (wipe > clearedRef.current) {
       clearedRef.current = wipe;
       msgsRef.current = (data.messages ?? []).filter((m) => m.id > 0);
+      memsRef.current = data.members ?? [];
     } else if ((data.messages ?? []).some((m) => m.id > 0)) {
       const map = new Map<number, Msg>();
       for (const row of msgsRef.current) if (row.id > 0) map.set(row.id, row);
       for (const row of data.messages ?? []) if (row.id > 0) map.set(row.id, row);
       msgsRef.current = [...map.values()].sort((a, b) => a.id - b.id);
     }
-    return { ...data, messages: msgsRef.current };
+    const incoming = data.members ?? [];
+    if (incoming.length) memsRef.current = incoming;
+    return { ...data, messages: msgsRef.current, members: memsRef.current };
   };
 
   useEffect(() => {
@@ -702,7 +694,7 @@ export function PartyWindow() {
     const pull = async () => {
       try {
         const res = await fetch(
-          `/api/party?room=${encodeURIComponent(joinedRef.current)}&token=${encodeURIComponent(tokenRef.current)}&uid=${encodeURIComponent(userId())}&nick=${encodeURIComponent(nickRef.current || "")}&was=${encodeURIComponent(myNicks().filter((n) => n && n !== nickRef.current).join(","))}`,
+          `/api/party?room=${encodeURIComponent(joinedRef.current)}&token=${encodeURIComponent(tokenRef.current)}&uid=${encodeURIComponent(userId())}&nick=${encodeURIComponent(nickRef.current || "")}`,
         );
         const data = (await res.json()) as RoomState & { ok?: boolean; error?: string };
         if (!live) return;
@@ -719,15 +711,8 @@ export function PartyWindow() {
             clearPartyBadge();
           } else if (top > seen) {
             const fresh = msgs.filter((m) => (m.id || 0) > Math.max(prev, seen) && m.uid !== mine && m.nick !== nickRef.current);
-            if (fresh.length || (prev === 0 && top > seen)) {
-              markUnread();
-              if (fresh.length) {
-                const last = fresh[fresh.length - 1]!;
-                void partyNotify();
-              }
-            } else {
-              markUnread();
-            }
+            if (fresh.length) void partyNotify();
+            else markUnread();
           }
           if (top) lastHeardRef.current = top;
           if (!shareOffRef.current && pinKeepRef.current && Array.isArray(data.members)) {
@@ -777,6 +762,7 @@ export function PartyWindow() {
           setState(null);
           setPending([]);
           msgsRef.current = [];
+          memsRef.current = [];
           clearedRef.current = 0;
           setRoom("");
           setPass("");
@@ -822,20 +808,14 @@ export function PartyWindow() {
   }, [joined, token, lang, t.partyFull]);
 
   useLayoutEffect(() => {
-    if (!open || collapsed || !joined) return;
-    stickRef.current = true;
-    const go = () => {
-      const el = logRef.current;
-      if (!el) return;
-      el.scrollTop = el.scrollHeight;
-    };
-    go();
-    const frame = requestAnimationFrame(go);
-    const t = window.setTimeout(go, 40);
-    return () => {
-      cancelAnimationFrame(frame);
-      window.clearTimeout(t);
-    };
+    if (open && joined && !collapsed) stickRef.current = true;
+  }, [open, joined, collapsed]);
+
+  useLayoutEffect(() => {
+    if (!open || collapsed || !joined || !stickRef.current) return;
+    const el = logRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
   }, [open, collapsed, joined, state?.messages.length, pending.length]);
 
   const sawOpenRef = useRef(false);
@@ -929,6 +909,7 @@ export function PartyWindow() {
       setNick(who);
       setToken(data.token);
       msgsRef.current = [];
+      memsRef.current = [];
       clearedRef.current = 0;
       setJoined(joinedName);
       setState(applyRoom(data));
@@ -962,6 +943,7 @@ export function PartyWindow() {
     const local: Msg = { id: -Date.now(), nick: who, body, at: new Date().toISOString() };
     setText("");
     setErr("");
+    stickRef.current = true;
     setPending((rows) => [...rows, local]);
     const ship = async (tok: string) =>
       partyPost({ action: "send", room: joinedRef.current, token: tok, text: body });
@@ -1027,6 +1009,7 @@ export function PartyWindow() {
     setState(null);
     setPending([]);
     msgsRef.current = [];
+    memsRef.current = [];
     clearedRef.current = 0;
     useMapStore.getState().setPartyCollapsed(false);
     useMapStore.getState().setPartyPins([]);
@@ -1051,6 +1034,7 @@ export function PartyWindow() {
       setState(null);
       setPending([]);
       msgsRef.current = [];
+      memsRef.current = [];
       clearedRef.current = 0;
       useMapStore.getState().setPartyCollapsed(false);
       useMapStore.getState().setPartyPins([]);
@@ -1167,7 +1151,7 @@ export function PartyWindow() {
   if (joined && collapsed) return null;
 
   return (
-    <div className="absolute inset-0 z-40 flex items-end justify-center bg-bg/50 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] md:items-center">
+    <div className="absolute inset-0 z-40 flex items-end justify-center bg-bg/50 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] overscroll-none md:items-center">
       <div className={`rpg-frame flex w-full max-w-md flex-col overflow-hidden ${joined ? "h-[min(78vh,36rem)]" : "max-h-[78vh]"}`}>
         <div className="flex items-center justify-between border-b-2 border-fg px-3 py-2.5">
           <p className="flex min-w-0 items-center gap-0.5 text-sm font-medium text-fg">
@@ -1217,7 +1201,7 @@ export function PartyWindow() {
 
         {joined ? (
           <>
-            <div className="border-b border-border px-3 py-2">
+            <div className="shrink-0 border-b border-border px-3 py-2">
               <p className="mb-1.5 text-[11px] font-medium text-fg-muted">
                 {t.partyMembers} · {t.partySeats.replace("{n}", String(members.length))}
               </p>
@@ -1260,16 +1244,19 @@ export function PartyWindow() {
                 })}
               </div>
             </div>
-            <div
-              ref={logRef}
-              data-tr={trTick}
-              className="min-h-0 flex-1 overflow-y-scroll overscroll-contain px-3 py-2 [-webkit-overflow-scrolling:touch]"
-              onScroll={() => {
-                const el = logRef.current;
-                if (!el) return;
-                stickRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 72;
-              }}
-            >
+            <div className="relative min-h-0 flex-1 overflow-hidden">
+              <div
+                ref={logRef}
+                data-tr={trTick}
+                className="absolute inset-0 h-full overflow-y-auto overscroll-contain px-3 py-2 [-webkit-overflow-scrolling:touch] [touch-action:pan-y]"
+                onTouchStart={(e) => e.stopPropagation()}
+                onWheel={(e) => e.stopPropagation()}
+                onScroll={() => {
+                  const el = logRef.current;
+                  if (!el) return;
+                  stickRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+                }}
+              >
               {messages.length ? (
                 <div className="flex flex-col gap-2">
                   {messages.map((row) => {
@@ -1287,8 +1274,9 @@ export function PartyWindow() {
               ) : (
                 <p className="py-6 text-center text-xs text-fg-muted">{t.partyEmpty}</p>
               )}
+              </div>
             </div>
-            <form onSubmit={(e) => void send(e)} className="flex flex-col gap-2 border-t-2 border-fg p-3">
+            <form onSubmit={(e) => void send(e)} className="flex shrink-0 flex-col gap-2 border-t-2 border-fg p-3">
               <div className="flex gap-2">
                 <Input value={text} onChange={(e) => setText(e.target.value.slice(0, 160))} />
                 <Button type="submit" disabled={!text.trim()}>

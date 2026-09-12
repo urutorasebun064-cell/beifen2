@@ -1,5 +1,5 @@
 /* J PWA — never hijack navigations or scripts. Old interceptors caused a black screen. */
-const SW_VER = "j-v19";
+const SW_VER = "j-v22";
 const TILES = "jb-tiles-v1";
 const STATIC = "jb-static-v1";
 
@@ -83,24 +83,8 @@ self.addEventListener("push", (event) => {
         /* */
       }
       if (focused) return;
-      let title = "J-Bmap";
-      let body = "•";
-      try {
-        const data = event.data ? event.data.json() : null;
-        if (data && typeof data === "object") {
-          if (typeof data.title === "string" && data.title) title = data.title;
-          if (typeof data.body === "string" && data.body) body = data.body;
-        }
-      } catch {
-        try {
-          const text = event.data ? event.data.text() : "";
-          if (text) body = "•";
-        } catch {
-          /* */
-        }
-      }
-      await self.registration.showNotification(title, {
-        body,
+      await self.registration.showNotification("J", {
+        body: "•",
         tag: "jb-party",
         icon: "/icon-192.png",
         badge: "/icon-192.png",

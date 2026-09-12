@@ -20,7 +20,7 @@ const VAPID_FILE = join(process.cwd(), ".data", "party-vapid.json");
 type PushSub = { endpoint: string; p256dh: string; auth: string };
 type Member = { id: string; nick: string; token: string; last: number; online: boolean; host?: boolean; lng?: number; lat?: number; pinAt?: number; near?: string; pinOff?: boolean; push?: PushSub };
 type Msg = { id: number; nick: string; body: string; at: string; uid?: string };
-type Room = { name: string; pass: string; hostId: string; members: Member[]; messages: Msg[]; msgId: number; msgTotal: number; expiresAt: number; born?: number; boundNicks?: Record<string, string>; clearedAt?: number };
+type Room = { name: string; pass: string; hostId: string; members: Member[]; messages: Msg[]; msgId: number; msgTotal: number; expiresAt: number; born?: number; boundNicks?: Record<string, string>; clearedAt?: number; memRev?: number };
 type Saved = Room & { key: string };
 
 type G = typeof globalThis & { __jbPartyRooms?: Map<string, Room>; __jbPartyGone?: Map<string, number> };
@@ -220,46 +220,72 @@ function gtxLang(lang: string) {
   return "ja";
 }
 
+function guessSrcLang(s: string) {
+  if (/[\u3040-\u30ff]/.test(s)) return "ja";
+  if (/[A-Za-z]/.test(s) && !/[\u3040-\u9fff]/.test(s)) return "en";
+  if (/[\u4e00-\u9fff]/.test(s)) return "zh-CN";
+  return "";
+}
+
+function badTr(s: string) {
+  const u = s.toUpperCase();
+  return u.includes("INVALID SOURCE LANGUAGE") || u.includes("LANGPAIR=") || u.includes("MYMEMORY WARNING") || u.includes("PLEASE SELECT TWO DISTINCT");
+}
+
 type GT = typeof globalThis & { __jbChatTr?: Map<string, string> };
 const chatTr: Map<string, string> =
   (globalThis as GT).__jbChatTr ?? ((globalThis as GT).__jbChatTr = new Map<string, string>());
+
+function parseGtx(data: unknown): string {
+  if (typeof data === "string") return data.trim();
+  if (!Array.isArray(data) || !data.length) return "";
+  const a = data[0];
+  if (typeof a === "string") return a.trim();
+  if (Array.isArray(a)) {
+    if (typeof a[0] === "string") return String(a[0]).trim();
+    if (Array.isArray(a[0])) {
+      return a
+        .map((row) => (Array.isArray(row) ? String(row[0] ?? "") : ""))
+        .join("")
+        .trim();
+    }
+  }
+  return "";
+}
 
 async function translateOne(text: string, lang: string) {
   const src = text.slice(0, 160);
   if (!src) return "";
   const key = `${lang}:${src}`;
   const hit = chatTr.get(key);
-  if (hit) return hit;
+  if (hit && !badTr(hit) && hit !== "__miss__") return hit;
   const tl = gtxLang(lang);
   let out = "";
-  try {
-    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=${encodeURIComponent(tl)}&dt=t&q=${encodeURIComponent(src)}`;
-    const res = await fetch(url, {
-      headers: { Accept: "application/json", "User-Agent": "Mozilla/5.0" },
-      signal: AbortSignal.timeout(5000),
-    });
-    const data = (await res.json()) as unknown;
-    if (Array.isArray(data) && Array.isArray(data[0])) {
-      out = (data[0] as unknown[])
-        .map((row) => (Array.isArray(row) ? String(row[0] ?? "") : ""))
-        .join("");
-    }
-  } catch {
-    out = "";
-  }
-  if (!out.trim()) {
+  const urls = [
+    `https://clients5.google.com/translate_a/t?client=dict-chrome-ex&sl=auto&tl=${encodeURIComponent(tl)}&q=${encodeURIComponent(src)}`,
+    `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=${encodeURIComponent(tl)}&dt=t&q=${encodeURIComponent(src)}`,
+  ];
+  for (const url of urls) {
     try {
-      const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(src)}&langpair=aut|${encodeURIComponent(tl)}`;
-      const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
-      const data = (await res.json()) as { responseData?: { translatedText?: string } };
-      out = String(data.responseData?.translatedText ?? "");
+      const res = await fetch(url, {
+        headers: { Accept: "application/json", "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36" },
+        signal: AbortSignal.timeout(8000),
+      });
+      if (!res.ok) continue;
+      const ctype = res.headers.get("content-type") || "";
+      const raw = await res.text();
+      if (!raw || ctype.includes("text/html")) continue;
+      const data = JSON.parse(raw) as unknown;
+      out = parseGtx(data);
+      if (out && !badTr(out)) break;
+      out = "";
     } catch {
       out = "";
     }
   }
-  const textOut = out.trim() || src;
-  chatTr.set(key, textOut);
-  return textOut;
+  if (!out.trim() || badTr(out)) return src;
+  chatTr.set(key, out.trim());
+  return out.trim();
 }
 
 async function translateMany(texts: string[], lang: string) {
@@ -311,10 +337,10 @@ function sameRoom(a: string, b: string) {
 }
 
 function packMembers(room: Room) {
-  return JSON.stringify({ v: 2, members: room.members, nicks: room.boundNicks || {} });
+  return JSON.stringify({ v: 2, members: room.members, nicks: room.boundNicks || {}, rev: room.memRev || 0 });
 }
 
-function unpackMembers(raw: unknown): { members: Member[]; nicks: Record<string, string> } {
+function unpackMembers(raw: unknown): { members: Member[]; nicks: Record<string, string>; rev: number } {
   let v: unknown = raw;
   if (typeof raw === "string") {
     try {
@@ -324,13 +350,14 @@ function unpackMembers(raw: unknown): { members: Member[]; nicks: Record<string,
     }
   }
   if (v && typeof v === "object" && !Array.isArray(v) && Array.isArray((v as { members?: unknown }).members)) {
-    const rec = v as { members: unknown; nicks?: Record<string, string> };
+    const rec = v as { members: unknown; nicks?: Record<string, string>; rev?: number };
     return {
       members: asList<Member>(rec.members),
       nicks: rec.nicks && typeof rec.nicks === "object" ? rec.nicks : {},
+      rev: Number(rec.rev) || 0,
     };
   }
-  return { members: asList<Member>(raw), nicks: {} };
+  return { members: asList<Member>(raw), nicks: {}, rev: 0 };
 }
 
 function asList<T>(raw: unknown): T[] {
@@ -391,6 +418,7 @@ function normalizeRoom(row: Partial<Room> & { name: string }): Room {
     expiresAt: Number((row as Room).expiresAt) || seedTtl(),
     boundNicks: row.boundNicks && typeof row.boundNicks === "object" ? { ...row.boundNicks } : {},
     clearedAt: Number(row.clearedAt) || 0,
+    memRev: Number((row as Room).memRev) || 0,
   };
 }
 
@@ -434,9 +462,19 @@ function mergeRoom(key: string, incoming: Room) {
   if (next.pass && !cur.pass) cur.pass = next.pass;
   if (next.hostId && !cur.hostId) cur.hostId = next.hostId;
   if (next.expiresAt && next.expiresAt > (cur.expiresAt || 0)) cur.expiresAt = next.expiresAt;
+  const nextRev = Number(next.memRev) || 0;
+  const curRev = Number(cur.memRev) || 0;
+  if (nextRev > curRev) {
+    cur.members = next.members.slice();
+    cur.memRev = nextRev;
+    if (next.hostId) cur.hostId = next.hostId;
+  } else {
   for (const m of next.members) {
     const have = cur.members.find((x) => x.id === m.id || (m.token && x.token === m.token));
-    if (!have) continue;
+    if (!have) {
+      cur.members.push(m);
+      continue;
+    }
     if ((m.last ?? 0) >= (have.last ?? 0)) {
       have.last = m.last;
       have.token = m.token || have.token;
@@ -461,6 +499,7 @@ function mergeRoom(key: string, incoming: Room) {
       have.pinAt = incomingPin;
       have.pinOff = true;
     }
+  }
   }
   collapseMembers(cur);
   for (const m of cur.members) m.host = m.id === cur.hostId;
@@ -622,17 +661,20 @@ async function hydrateSql() {
           }
           continue;
         }
+        const packed = unpackMembers(row.members);
         mergeRoom(
           key,
           normalizeRoom({
             name: String(row.name ?? key),
             pass: String(row.pass ?? ""),
-            members: asList<Member>(row.members),
+            members: packed.members,
             messages: asList<Msg>(row.messages),
             msgId: Number(row.msg_id) || 1,
             msgTotal: Number(row.msg_total) || 0,
             hostId: String(row.host_id ?? ""),
             expiresAt: Number.isFinite(exp) ? exp : seedTtl(),
+            boundNicks: packed.nicks,
+            memRev: packed.rev,
           }),
         );
       }
@@ -1020,6 +1062,7 @@ function takeSeat(room: Room, nick: string, token: string, uid: string, was = ""
     member.host = true;
   }
   room.members.push(member);
+  room.memRev = (room.memRev || 0) + 1;
   dropOldSelf(room, member, uid, token, was);
   collapseMembers(room, member.id);
   bindNick(room, member.id, member.token, member.nick);
@@ -1070,12 +1113,9 @@ export const Route = createFileRoute("/api/party")({
         markAway(room);
         me.last = Date.now();
         me.online = true;
-        const wasQ = (url.searchParams.get("was") ?? "").trim().slice(0, 120);
-        const n0 = room.members.length;
-        dropOldSelf(room, me, uid, token, wasQ);
+        dropOldSelf(room, me, uid, token, "");
         collapseMembers(room, me.id);
-        if (room.members.length !== n0) void saveRoom(key, room);
-        return json({ ok: true, vapid: await vapidOut(), ...publicOf(room, me.id, wasQ), you: me.nick, youId: me.id, host: me.id === room.hostId });
+        return json({ ok: true, vapid: await vapidOut(), ...publicOf(room, me.id), you: me.nick, youId: me.id, host: me.id === room.hostId });
       },
       POST: async ({ request }) => {
         let body: {
@@ -1173,6 +1213,7 @@ export const Route = createFileRoute("/api/party")({
         if (action === "leave") {
           room.members = room.members.filter((m) => m.id !== me.id && m.token !== me.token && !(uid && m.id === uid));
           for (const m of room.members) m.host = m.id === room.hostId;
+          room.memRev = (room.memRev || 0) + 1;
           await saveRoom(found.key, room);
           return json({ ok: true });
         }

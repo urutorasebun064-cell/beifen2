@@ -1,6 +1,6 @@
 import { Component, FormEvent, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { ChevronDown, Navigation, X } from "lucide-react";
-import { copies } from "@/lib/i18n";
+import { copies, type Lang } from "@/lib/i18n";
 import { hanFold } from "@/lib/han";
 import { isInJapan, stationsNearPlace } from "@/lib/rail/geo";
 import { applyMateTrip } from "@/components/app/search-panel";
@@ -266,6 +266,49 @@ async function bindPush(room: string, token: string, vapid?: string) {
   }
 }
 
+const trCache = new Map<string, string>();
+
+function guessChatLang(s: string): Lang | "" {
+  if (/[\u3040-\u30ff]/u.test(s)) return "ja";
+  if (/[\u4e00-\u9fff]/u.test(s)) return "zh";
+  if (/[A-Za-z]/.test(s) && !/[\u3040-\u9fff]/u.test(s)) return "en";
+  return "";
+}
+
+async function fillChatTr(bodies: string[], lang: Lang) {
+  const uniq = [...new Set(bodies.map((b) => b.trim()).filter(Boolean))];
+  const need: string[] = [];
+  for (const b of uniq) {
+    const k = `${lang}\t${b}`;
+    if (trCache.has(k)) continue;
+    if (guessChatLang(b) === lang) {
+      trCache.set(k, b);
+      continue;
+    }
+    need.push(b);
+  }
+  if (!need.length) return false;
+  try {
+    const res = await fetch("/api/party", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "translate", lang, texts: need.slice(0, 40) }),
+    });
+    const data = (await res.json()) as { ok?: boolean; map?: Record<string, string> };
+    if (data.map) {
+      for (const [src, dst] of Object.entries(data.map)) trCache.set(`${lang}\t${src}`, dst || src);
+    }
+    for (const b of need) if (!trCache.has(`${lang}\t${b}`)) trCache.set(`${lang}\t${b}`, b);
+  } catch {
+    for (const b of need) if (!trCache.has(`${lang}\t${b}`)) trCache.set(`${lang}\t${b}`, b);
+  }
+  return true;
+}
+
+function shownChat(body: string, lang: Lang) {
+  return trCache.get(`${lang}\t${body}`) ?? body;
+}
+
 async function partyPost(body: Record<string, string>) {
   const was = myNicks()
     .filter((n) => n && n !== body.nick)
@@ -446,6 +489,7 @@ export function PartyWindow() {
   const [pending, setPending] = useState<Msg[]>([]);
   const [state, setState] = useState<RoomState | null>(null);
   const [sharing, setSharing] = useState(false);
+  const [trTick, setTrTick] = useState(0);
   const collapsed = useMapStore((s) => s.partyCollapsed);
   const logRef = useRef<HTMLDivElement>(null);
   const stickRef = useRef(true);
@@ -766,6 +810,15 @@ export function PartyWindow() {
     useMapStore.getState().setPartyPins(rows);
   }, [state?.members, joined, nick]);
 
+  const chatBodies = `${(state?.messages ?? []).map((m) => `${m.id}:${m.body}`).join("|")}|${pending.map((m) => m.body).join("|")}`;
+  useEffect(() => {
+    if (!joined) return;
+    const bodies = [...(state?.messages ?? []).map((m) => m.body), ...pending.map((m) => m.body)];
+    void fillChatTr(bodies, lang).then((changed) => {
+      if (changed) setTrTick((n) => n + 1);
+    });
+  }, [joined, lang, chatBodies]);
+
   if (!open) return null;
 
   const fail = (code?: string, keep?: string) => {
@@ -1048,6 +1101,7 @@ export function PartyWindow() {
     ...(state?.messages ?? []),
     ...pending.filter((p) => !(state?.messages ?? []).some((m) => m.body === p.body && (m.uid === meId || m.nick === p.nick))),
   ];
+
   const sharingMe = members.some((m) => m.id === meId && Number.isFinite(m.lng) && Number.isFinite(m.lat));
 
   if (joined && collapsed) return null;
@@ -1148,6 +1202,7 @@ export function PartyWindow() {
             </div>
             <div
               ref={logRef}
+              data-tr={trTick}
               className="min-h-0 flex-1 overflow-y-scroll overscroll-contain px-3 py-2 [-webkit-overflow-scrolling:touch]"
               onScroll={() => {
                 const el = logRef.current;
@@ -1163,7 +1218,7 @@ export function PartyWindow() {
                       <div key={row.id} className={`flex ${mine ? "justify-end" : "justify-start"}`}>
                         <div className={`max-w-[80%] rounded-[var(--radius-sm)] px-3 py-2 ${mine ? "bg-accent/15" : "bg-fg/5"}`}>
                           <p className={`text-[10px] font-medium text-fg-muted ${mine ? "text-right" : "text-left"}`}>{row.nick}</p>
-                          <p className="text-sm text-fg">{row.body}</p>
+                          <p className="text-sm text-fg">{shownChat(row.body, lang)}</p>
                         </div>
                       </div>
                     );
@@ -1256,9 +1311,7 @@ export function PartyWindow() {
                     }}
                   >
                     {row.name}
-                    <span className="ml-2 text-xs opacity-70">
-                      {row.n}/{row.seats}
-                    </span>
+                    <span className="ml-2 text-xs opacity-70">{t.partySeats.replace("{n}", String(row.n))}</span>
                   </button>
                 ))}
               </div>

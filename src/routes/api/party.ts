@@ -13,8 +13,8 @@ const MSG_BONUS = 300;
 const DAY_MS = 24 * 3600 * 1000;
 const LIVE_MS = 3 * DAY_MS;
 const CAP_MS = 7 * DAY_MS;
-const GONE_MS = 20 * 60 * 1000;
 const FILE = join(process.cwd(), ".data", "party-rooms.json");
+const GONE_FILE = join(process.cwd(), ".data", "party-gone.json");
 const VAPID_FILE = join(process.cwd(), ".data", "party-vapid.json");
 
 type PushSub = { endpoint: string; p256dh: string; auth: string };
@@ -146,18 +146,122 @@ async function pingPush(room: Room, exceptId: string) {
   await Promise.race([Promise.allSettled(jobs), new Promise((r) => setTimeout(r, 8000))]);
 }
 
+function loadGoneFile() {
+  try {
+    const rows = JSON.parse(readFileSync(GONE_FILE, "utf8")) as unknown;
+    if (!Array.isArray(rows)) return;
+    for (const k of rows) {
+      const key = String(k ?? "").trim();
+      if (key) gone.set(key, Date.now());
+    }
+  } catch {
+    /* */
+  }
+}
+
+function saveGoneFile() {
+  try {
+    mkdirSync(dirname(GONE_FILE), { recursive: true });
+    writeFileSync(GONE_FILE, JSON.stringify([...gone.keys()]));
+  } catch {
+    /* */
+  }
+}
+
+loadGoneFile();
+
 function markGone(key: string) {
   gone.set(key, Date.now());
+  saveGoneFile();
+  void saveGoneSql();
+}
+
+function unmarkGone(key: string) {
+  if (!gone.delete(key)) return;
+  saveGoneFile();
+  void saveGoneSql();
 }
 
 function stillGone(key: string) {
-  const t = gone.get(key);
-  if (!t) return false;
-  if (Date.now() - t > GONE_MS) {
-    gone.delete(key);
-    return false;
+  return gone.has(key);
+}
+
+async function saveGoneSql() {
+  try {
+    const sql = await getSql();
+    await sql.query("create table if not exists party_meta (k text primary key, v text not null)");
+    await sql.query("insert into party_meta (k, v) values ('gone', $1) on conflict (k) do update set v = excluded.v", [
+      JSON.stringify([...gone.keys()]),
+    ]);
+  } catch {
+    /* */
   }
-  return true;
+}
+
+async function hydrateGoneSql() {
+  try {
+    const sql = await getSql();
+    await sql.query("create table if not exists party_meta (k text primary key, v text not null)");
+    const rows = await sql.query<{ v: string }>("select v from party_meta where k = 'gone'");
+    const raw = rows[0]?.v ? (JSON.parse(rows[0].v) as unknown) : [];
+    if (!Array.isArray(raw)) return;
+    for (const k of raw) {
+      const key = String(k ?? "").trim();
+      if (key) gone.set(key, Date.now());
+    }
+  } catch {
+    /* */
+  }
+}
+
+function gtxLang(lang: string) {
+  if (lang === "zh") return "zh-CN";
+  if (lang === "en") return "en";
+  return "ja";
+}
+
+type GT = typeof globalThis & { __jbChatTr?: Map<string, string> };
+const chatTr: Map<string, string> =
+  (globalThis as GT).__jbChatTr ?? ((globalThis as GT).__jbChatTr = new Map<string, string>());
+
+function guessChatLang(s: string) {
+  if (/[\u3040-\u30ff]/.test(s)) return "ja";
+  if (/[\u4e00-\u9fff]/.test(s)) return "zh";
+  if (/[A-Za-z]/.test(s) && !/[\u3040-\u9fff]/.test(s)) return "en";
+  return "";
+}
+
+async function translateOne(text: string, lang: string) {
+  const src = text.slice(0, 160);
+  if (!src) return "";
+  if (guessChatLang(src) === lang) return src;
+  const key = `${lang}:${src}`;
+  const hit = chatTr.get(key);
+  if (hit) return hit;
+  const tl = gtxLang(lang);
+  try {
+    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=${tl}&dt=t&q=${encodeURIComponent(src)}`;
+    const res = await fetch(url, { headers: { Accept: "application/json" } });
+    const data = (await res.json()) as unknown;
+    let out = "";
+    if (Array.isArray(data) && Array.isArray(data[0])) {
+      out = (data[0] as unknown[])
+        .map((row) => (Array.isArray(row) ? String(row[0] ?? "") : ""))
+        .join("");
+    }
+    const textOut = out.trim() || src;
+    chatTr.set(key, textOut);
+    return textOut;
+  } catch {
+    return src;
+  }
+}
+
+async function translateMany(texts: string[], lang: string) {
+  const map: Record<string, string> = {};
+  const uniq = [...new Set(texts.map((t) => String(t ?? "").trim()).filter(Boolean))].slice(0, 40);
+  for (const t of uniq) map[t] = await translateOne(t, lang);
+  return map;
 }
 
 function seedTtl(now = Date.now()) {
@@ -901,6 +1005,7 @@ export const Route = createFileRoute("/api/party")({
       GET: async ({ request }) => {
         const url = new URL(request.url);
         if (url.searchParams.get("list") === "1") {
+          await hydrateGoneSql();
           hydrateFile();
           await hydrateSql();
           await purgeExpired();
@@ -961,6 +1066,8 @@ export const Route = createFileRoute("/api/party")({
           endpoint?: string;
           p256dh?: string;
           auth?: string;
+          lang?: string;
+          texts?: string[];
         } = {};
         try {
           body = (await request.json()) as typeof body;
@@ -968,6 +1075,12 @@ export const Route = createFileRoute("/api/party")({
           return json({ ok: false, error: "bad-json" }, 400);
         }
         const action = String(body.action ?? "");
+        if (action === "translate") {
+          const lang = String(body.lang ?? "ja");
+          const texts = Array.isArray(body.texts) ? body.texts.map((x) => String(x ?? "")) : body.text ? [String(body.text)] : [];
+          const map = await translateMany(texts, lang);
+          return json({ ok: true, map });
+        }
         const name = String(body.room ?? "").trim().slice(0, 20);
         const key = keyOf(name);
         const pass = String(body.pass ?? "").trim().slice(0, 32);
@@ -980,6 +1093,7 @@ export const Route = createFileRoute("/api/party")({
 
         if (action === "create" || action === "join") {
           if (!key || !pass || !nick) return json({ ok: false, error: "need" }, 400);
+          await hydrateGoneSql();
           await purgeExpired();
           if (action === "join" && stillGone(key)) return json({ ok: false, error: "missing" }, 404);
           const found = await lookup(key, name);
@@ -990,7 +1104,7 @@ export const Route = createFileRoute("/api/party")({
             if (room) await dropRoom(found.key);
             const clash = [...rooms.entries()].find(([k, r]) => !stillGone(k) && !expired(r) && (k === key || keyOf(r.name) === key));
             if (clash) return json({ ok: false, error: "exists" }, 409);
-            gone.delete(key);
+            unmarkGone(key);
             room = { name, pass: hashPass(pass), hostId: "", members: [], messages: [], msgId: 1, msgTotal: 0, expiresAt: seedTtl(), born: Date.now() };
             roomKey = key;
             rooms.set(key, room);

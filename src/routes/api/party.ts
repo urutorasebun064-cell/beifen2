@@ -685,10 +685,7 @@ async function lookup(key: string, raw: string) {
 }
 
 function markAway(room: Room) {
-  const now = Date.now();
-  for (const m of room.members) {
-    if (now - (m.last || 0) > AWAY_MS) m.online = false;
-  }
+  for (const m of room.members) m.online = true;
 }
 
 function collapseMembers(room: Room, keepId?: string) {
@@ -784,7 +781,7 @@ function publicOf(room: Room, touchId?: string, was = "") {
     members: room.members.map((m) => ({
       id: m.id,
       nick: m.nick,
-      online: Boolean(m.online && Date.now() - m.last <= AWAY_MS),
+      online: true,
       host: m.id === room.hostId,
       ...(Number.isFinite(m.lng) && Number.isFinite(m.lat)
         ? { lng: m.lng, lat: m.lat, pinAt: m.pinAt, near: m.near }
@@ -860,7 +857,7 @@ function wasNicks(was: string) {
 }
 
 function isLive(m: Member) {
-  return m.online !== false && Date.now() - (m.last || 0) <= AWAY_MS;
+  return m.online !== false;
 }
 
 function nickTaken(room: Room, nick: string, exceptId?: string) {

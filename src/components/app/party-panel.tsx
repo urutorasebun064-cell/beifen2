@@ -244,7 +244,7 @@ async function bindPush(room: string, token: string, vapid?: string) {
   try {
     if (Notification.permission === "default") await Notification.requestPermission();
     if (Notification.permission !== "granted") return false;
-    await navigator.serviceWorker.register("/sw.js?v=26", { scope: "/", updateViaCache: "none" });
+    await navigator.serviceWorker.register("/sw.js?v=27", { scope: "/", updateViaCache: "none" });
     const reg = await navigator.serviceWorker.ready;
     await reg.update().catch(() => undefined);
     const key = url64(vapid);
@@ -443,10 +443,35 @@ function saveSeen(room: string, id: number) {
   }
 }
 
-async function partyNotify() {
+async function partyNotify(preview = "•") {
   markUnread();
   pingChat();
+  const s = useMapStore.getState();
+  if (!s.partyCollapsed && s.partyMenuOpen && document.visibilityState === "visible") return;
+  if (document.visibilityState === "visible") return;
+  try {
+    if (!("Notification" in window) || Notification.permission !== "granted") return;
+    const reg = await navigator.serviceWorker.ready;
+    await reg.showNotification("J", {
+      body: preview,
+      tag: "jb-party-" + Date.now(),
+      icon: "/icon-192.png",
+      badge: "/icon-192.png",
+      silent: false,
+      renotify: true,
+      vibrate: [40, 80, 40],
+      data: { type: "party-alert" },
+    });
+  } catch {
+    try {
+      new Notification("J", { body: preview, silent: false });
+    } catch {
+      /* */
+    }
+  }
 }
+
+let pushNow: (() => void) | null = null;
 
 export function PartyButton() {
   const lang = useMapStore((s) => s.lang);
@@ -468,6 +493,7 @@ export function PartyButton() {
       className={`jb-chip relative inline-flex min-h-36 w-11 items-center justify-center overflow-visible rounded-[var(--radius-md)] bg-surface/94 py-3 text-xs font-medium shadow-[var(--shadow-border)] backdrop-blur-md [writing-mode:vertical-rl] ${open || inRoom ? "text-accent" : "text-fg"} ${lang === "zh" ? "tracking-normal" : "tracking-[0.18em]"}`}
       onClick={() => {
         unlockPing();
+        pushNow?.();
         const s = useMapStore.getState();
         if (s.partyInRoom) {
           if (s.partyCollapsed || !s.partyMenuOpen) {
@@ -547,6 +573,11 @@ export function PartyWindow() {
   nickRef.current = nick;
   joinedRef.current = joined;
   tokenRef.current = token;
+  pushNow = () => {
+    if (joinedRef.current && tokenRef.current && vapidRef.current) {
+      void bindPush(joinedRef.current, tokenRef.current, vapidRef.current);
+    }
+  };
 
   const applyRoom = (data: RoomState) => {
     const wipe = Number(data.cleared) || 0;
@@ -726,8 +757,10 @@ export function PartyWindow() {
             clearPartyBadge();
           } else if (top > seen) {
             const fresh = msgs.filter((m) => (m.id || 0) > Math.max(prev, seen) && m.uid !== mine && m.nick !== nickRef.current);
-            if (fresh.length) void partyNotify();
-            else markUnread();
+            if (fresh.length) {
+              const row = fresh[fresh.length - 1]!;
+              void partyNotify(`${row.nick}: ${(row.body || "•").slice(0, 40)}`);
+            } else markUnread();
           }
           if (top) lastHeardRef.current = top;
           if (!shareOffRef.current && pinKeepRef.current && Array.isArray(data.members)) {
@@ -799,18 +832,18 @@ export function PartyWindow() {
     let id = 0;
     const arm = () => {
       window.clearInterval(id);
-      id = 0;
-      if (document.visibilityState === "visible") id = window.setInterval(pull, 900);
+      id = window.setInterval(pull, document.visibilityState === "visible" ? 900 : 4000);
     };
     arm();
     const onShow = () => {
       arm();
-      if (document.visibilityState === "visible") void pull();
-      else if (joinedRef.current && tokenRef.current && vapidRef.current) {
+      void pull();
+      if (joinedRef.current && tokenRef.current && vapidRef.current) {
         void bindPush(joinedRef.current, tokenRef.current, vapidRef.current);
       }
     };
     const onHide = () => {
+      arm();
       if (joinedRef.current && tokenRef.current && vapidRef.current) {
         void bindPush(joinedRef.current, tokenRef.current, vapidRef.current);
       }

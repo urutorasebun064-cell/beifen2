@@ -135,5 +135,8 @@ export type Journey = {
   delaySec?: number;
   /** Line-level 運行情報 delay with no numeric seconds (Yahoo 列車遅延). */
   delayAlert?: boolean;
+  fast?: boolean;
+  easy?: boolean;
+  cheap?: boolean;
 };
 

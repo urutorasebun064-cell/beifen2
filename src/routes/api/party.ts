@@ -183,6 +183,11 @@ async function pingPush(room: Room, exceptId: string) {
     if (p.uid === exceptId || !p.endpoint) continue;
     if (!bag.has(p.endpoint)) bag.set(p.endpoint, p);
   }
+  for (const p of partyPush.values()) {
+    if (p.uid === exceptId || !p.endpoint) continue;
+    if (p.room !== roomKey) continue;
+    if (!bag.has(p.endpoint)) bag.set(p.endpoint, p);
+  }
   const jobs = [...bag.values()].map((p) =>
     wp
       .sendNotification({ endpoint: p.endpoint, keys: { p256dh: p.p256dh, auth: p.auth } }, payload, { TTL: 86400, urgency: "high" })
@@ -195,17 +200,6 @@ async function pingPush(room: Room, exceptId: string) {
         }
       }),
   );
-  if (!jobs.length) {
-    for (const p of partyPush.values()) {
-      if (p.uid === exceptId || !p.endpoint) continue;
-      if (p.room !== roomKey) continue;
-      jobs.push(
-        wp
-          .sendNotification({ endpoint: p.endpoint, keys: { p256dh: p.p256dh, auth: p.auth } }, payload, { TTL: 86400, urgency: "high" })
-          .catch(() => undefined),
-      );
-    }
-  }
   if (!jobs.length) return;
   await Promise.race([Promise.allSettled(jobs), new Promise((r) => setTimeout(r, 8000))]);
 }
@@ -1355,11 +1349,7 @@ export const Route = createFileRoute("/api/party")({
               /* */
             }
           })();
-          try {
-            await pingPush(room, me.id);
-          } catch {
-            /* */
-          }
+          void pingPush(room, me.id).catch(() => undefined);
           return json({ ok: true, vapid: await vapidOut(), ...publicOf(room, me.id, was), you: me.nick, youId: me.id, host: me.id === room.hostId });
         }
         if (action === "share") {

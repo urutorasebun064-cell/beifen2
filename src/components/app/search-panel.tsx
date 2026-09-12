@@ -66,19 +66,6 @@ function pushJourney(list: Journey[], seen: Set<string>, j: Journey | null | und
   list.push(lined);
 }
 
-function uniqueDeparts(list: Journey[]) {
-  const seen = new Set<string>();
-  const out: Journey[] = [];
-  for (const j of list) {
-    const ride = j.legs.find((l) => l.kind === "ride");
-    const k = `${j.departHhmm}|${ride?.lineName ?? ""}|${ride?.to.name ?? ""}`;
-    if (seen.has(k)) continue;
-    seen.add(k);
-    out.push(j);
-  }
-  return out;
-}
-
 function routeShape(j: Journey) {
   return j.legs.map((l) => `${l.kind}:${l.lineName ?? ""}:${l.from.name}:${l.to.name}`).join("|");
 }
@@ -372,29 +359,28 @@ export async function applyTrip(origin: StationHit | { lng: number; lat: number 
       const notPassed = (j: Journey) => departDue(j.departHhmm, nowMin) + Math.max(0, j.delayMin ?? 0) >= 0;
       let yahoo = await pullYahoo("1", clock.hour, clock.minute);
       if (!yahoo.length) yahoo = await pullYahoo("1", clock.hour, clock.minute, true);
-      let live = uniqueDeparts(yahoo.filter(notPassed));
-      if (live.length) {
-        const last = live[live.length - 1]!;
-        const [lh, lm] = last.departHhmm.split(":").map(Number);
-        let h = Number(lh) || clock.hour;
-        let m = (Number(lm) || 0) + 1;
-        if (m >= 60) {
-          h += 1;
-          m = 0;
-        }
-        const more = uniqueDeparts((await pullYahoo("1", h % 24, m)).filter(notPassed));
-        const seen = new Set(live.map((j) => `${j.departHhmm}|${routeShape(j)}`));
-        for (const j of more) {
-          const k = `${j.departHhmm}|${routeShape(j)}`;
-          if (seen.has(k)) continue;
-          seen.add(k);
-          live.push(j);
-          if (live.length >= 12) break;
+      const firstWait = yahoo[0] ? departDue(yahoo[0]!.departHhmm, nowMin) + Math.max(0, yahoo[0]!.delayMin ?? 0) : 99;
+      if (yahoo.length && firstWait > 0) {
+        const prev = (nowMin + 1439) % 1440;
+        const edge = await pullYahoo("1", Math.floor(prev / 60), prev % 60);
+        if (edge.length) {
+          const seen = new Set(yahoo.map((j) => `${j.departHhmm}|${routeShape(j)}`));
+          const add = edge.filter((j) => notPassed(j) && !seen.has(`${j.departHhmm}|${routeShape(j)}`));
+          add.sort((a, b) => departDue(a.departHhmm, nowMin) - departDue(b.departHhmm, nowMin));
+          yahoo = add.concat(yahoo);
         }
       }
-      if (!live.length && (nowMin >= 21 * 60 || nowMin < FIRST_MIN)) {
+      let live = yahoo.filter(notPassed);
+      if (!live.length) live = yahoo;
+      if (!live.length) {
+        const last = await pullYahoo("2");
+        live = last.filter(notPassed);
+        if (!live.length) live = last;
+      }
+      if (!live.length) {
         const firsts = await pullYahoo("3", 4, 50);
-        live = uniqueDeparts(firsts.filter(notPassed));
+        live = firsts.filter(notPassed);
+        if (!live.length) live = firsts;
       }
       if (live.length) journeys.push(...live);
     }
@@ -404,12 +390,13 @@ export async function applyTrip(origin: StationHit | { lng: number; lat: number 
     const stillDue = (j: Journey) => departDue(j.departHhmm, nowMin) + Math.max(0, j.delayMin ?? 0) >= 0;
     const store = useMapStore.getState();
     let live: Journey[] = journeys.filter(stillDue);
+    if (!live.length) live = journeys.slice();
     if (!live.length) {
       store.setJourneys([]);
       if (!silent) store.setSearching(false);
       return;
     }
-    const shown = live.slice(0, 12).map((j) => stampJourneyDelay(j, store.liveTrains));
+    const shown = live.slice(0, 6).map((j) => stampJourneyDelay(j, store.liveTrains));
     const keep = shown.filter(stillDue);
     const final = keep.length ? keep : shown;
     if (!final.length) {

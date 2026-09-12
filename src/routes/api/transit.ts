@@ -118,14 +118,12 @@ async function yahooPage(
     type,
     ticket: "ic",
     expkind: "1",
-    ws: "2",
+    ws: "3",
     s: "0",
     al: "1",
     shin: "1",
     ex: "1",
     hb: "1",
-    lb: "1",
-    sr: "1",
   });
   if (extra?.flatlon) qs.set("flatlon", extra.flatlon);
   if (extra?.tlatlon) qs.set("tlatlon", extra.tlatlon);

@@ -23,7 +23,7 @@ import {
 } from "@/lib/weather";
 import type { Journey, LineRuntime, RouteLeg, StationHit, Train } from "@/lib/rail/types";
 import { Button } from "@/components/ui/button";
-import { applyMateTrip, calibrateTrain, calibrateStation, fillPickedStation, locateUser, noteStreetZoom } from "@/components/app/search-panel";
+import { applyMateTrip, calibrateTrain, calibrateStation, fillPickedStation, headingFresh, locateUser, noteStreetZoom } from "@/components/app/search-panel";
 import { chainRailPath, findLineForLeg, locateStation, sliceRailPath } from "@/lib/rail/graph";
 import { placeTrainOnLeg, stopIndexByName } from "@/lib/rail/timetable-snap";
 import { arrivalCompare, journeyGuide, rideHeadline } from "@/components/app/route-panel";
@@ -3683,7 +3683,11 @@ export function CanvasMap() {
         return;
       }
       const keep =
-        !introDoneRef.current || Boolean(camLerpRef.current) || Boolean(drag.current) || Boolean(useMapStore.getState().followTrainId);
+        !introDoneRef.current ||
+        Boolean(camLerpRef.current) ||
+        Boolean(drag.current) ||
+        Boolean(useMapStore.getState().followTrainId) ||
+        headingFresh();
       if (!dirty && !keep) {
         running = false;
         return;
@@ -4482,14 +4486,12 @@ export function CanvasMap() {
             ctx.arc(x, y, 18 * pulse * r, 0, Math.PI * 2);
             ctx.fill();
             const hdgT = useMapStore.getState().headingDeg;
-            const flat = useMapStore.getState().headingFlat;
-            if (hdgT != null && flat) {
+            if (hdgT != null) {
               let d = hdgT - walk.hdg;
               while (d > 180) d -= 360;
               while (d < -180) d += 360;
-              walk.hdg += d * (Math.abs(d) > 80 ? 1 : Math.abs(d) > 35 ? 0.42 : 0.24);
-            }
-            if (hdgT != null) {
+              walk.hdg += d * (Math.abs(d) > 50 ? 1 : Math.abs(d) > 12 ? 0.55 : 0.38);
+              if (Math.abs(d) > 0.9) dirty = true;
               const rad = (walk.hdg * Math.PI) / 180;
               const step = 0.00038;
               const clat = Math.cos((walk.lat * Math.PI) / 180);
@@ -4642,7 +4644,7 @@ export function CanvasMap() {
       } catch {
         /* keep looping */
       }
-      if (dirty || !introDoneRef.current || camLerpRef.current || drag.current || useMapStore.getState().followTrainId) {
+      if (dirty || !introDoneRef.current || camLerpRef.current || drag.current || useMapStore.getState().followTrainId || headingFresh()) {
         running = true;
         raf = requestAnimationFrame(draw);
       } else {

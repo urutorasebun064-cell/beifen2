@@ -193,7 +193,16 @@ export const useMapStore = create<MapStore>((set, get) => ({
     })),
   headingDeg: null,
   headingFlat: false,
-  setHeading: (headingDeg, headingFlat) => set({ headingDeg, headingFlat }),
+  setHeading: (headingDeg, headingFlat) =>
+    set((s) => {
+      if (s.headingFlat === headingFlat && s.headingDeg != null && headingDeg != null) {
+        let d = headingDeg - s.headingDeg;
+        while (d > 180) d -= 360;
+        while (d < -180) d += 360;
+        if (Math.abs(d) < 0.4) return s;
+      }
+      return { headingDeg, headingFlat };
+    }),
   selectedStation: null,
   selectStation: (selectedStation) => set({ selectedStation }),
   selectedTrain: null,

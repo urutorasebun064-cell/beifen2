@@ -361,6 +361,17 @@ export async function applyTrip(origin: StationHit | { lng: number; lat: number 
       const notPassed = (j: Journey) => departDue(j.departHhmm, nowMin) + Math.max(0, j.delayMin ?? 0) >= 0;
       let yahoo = await pullYahoo("1", clock.hour, clock.minute);
       if (!yahoo.length) yahoo = await pullYahoo("1", clock.hour, clock.minute, true);
+      const firstWait = yahoo[0] ? departDue(yahoo[0]!.departHhmm, nowMin) + Math.max(0, yahoo[0]!.delayMin ?? 0) : 99;
+      if (yahoo.length && firstWait > 0) {
+        const prev = (nowMin + 1439) % 1440;
+        const edge = await pullYahoo("1", Math.floor(prev / 60), prev % 60);
+        if (edge.length) {
+          const seen = new Set(yahoo.map((j) => `${j.departHhmm}|${routeShape(j)}`));
+          const add = edge.filter((j) => notPassed(j) && !seen.has(`${j.departHhmm}|${routeShape(j)}`));
+          add.sort((a, b) => departDue(a.departHhmm, nowMin) - departDue(b.departHhmm, nowMin));
+          yahoo = add.concat(yahoo);
+        }
+      }
       let live = yahoo.filter(notPassed);
       if (!live.length) live = yahoo;
       if (!live.length) {
@@ -387,7 +398,7 @@ export async function applyTrip(origin: StationHit | { lng: number; lat: number 
       if (!silent) store.setSearching(false);
       return;
     }
-    const shown = live.slice(0, 12).map((j) => stampJourneyDelay(j, store.liveTrains));
+    const shown = live.slice(0, 6).map((j) => stampJourneyDelay(j, store.liveTrains));
     const keep = shown.filter(stillDue);
     const final = keep.length ? keep : shown;
     if (!final.length) {
@@ -406,8 +417,9 @@ export async function applyTrip(origin: StationHit | { lng: number; lat: number 
     }
     store.setSearching(false);
     store.setPickField(null);
-    const upcoming = final[0];
-    store.setJourneys(final, 0);
+    const upcoming = final.find((j) => departDue(j.departHhmm, nowMin) + Math.max(0, j.delayMin ?? 0) >= 0) ?? final[0];
+    const idx = Math.max(0, upcoming ? final.indexOf(upcoming) : 0);
+    store.setJourneys(final, idx);
     if (upcoming) lockJourneyTrain(upcoming, { camera: !silent && !skipCamera, keepSheet: false });
     store.setSheetOpen(false);
     void calibrateCorridor(final);
@@ -914,6 +926,7 @@ export async function applyPlaceTrip(
     st.setSearching(false);
     st.setSheetOpen(true);
   }
+  startHeading();
 }
 
 export async function applyStayTrip(stay: Stay) {
@@ -1508,6 +1521,7 @@ export function SearchPanel() {
 }
 
 let headingWatch = false;
+let headingApply: EventListener | null = null;
 const gpsHold = { lng: 0, lat: 0, acc: 9e9, t: 0, on: false, move: 0 };
 let fineTimer = 0;
 let watchId: number | null = null;
@@ -1515,6 +1529,19 @@ let visBound = false;
 let streetZoom = false;
 let lastFixAt = 0;
 let gpsHdgAt = 0;
+let compassAt = 0;
+let headingMovedAt = 0;
+
+export function headingFresh() {
+  return Date.now() - headingMovedAt < 800;
+}
+
+function headingDelta(a: number, b: number) {
+  let d = b - a;
+  while (d > 180) d -= 360;
+  while (d < -180) d += 360;
+  return d;
+}
 
 export function noteStreetZoom(on: boolean) {
   streetZoom = on;
@@ -1590,7 +1617,13 @@ function pushFix(pos: GeolocationPosition) {
   useMapStore.getState().setUserLocation({ lng, lat }, "ok");
   const spd = pos.coords.speed;
   const course = pos.coords.heading;
-  if (Number.isFinite(spd) && (spd as number) > 2.8 && Number.isFinite(course) && (course as number) >= 0) {
+  if (
+    Date.now() - compassAt > 1800 &&
+    Number.isFinite(spd) &&
+    (spd as number) > 2.8 &&
+    Number.isFinite(course) &&
+    (course as number) >= 0
+  ) {
     gpsHdgAt = Date.now();
     useMapStore.getState().setHeading(course as number, useMapStore.getState().headingFlat);
   }
@@ -1706,44 +1739,46 @@ export function locateUser(fly: boolean) {
 }
 
 function startHeading() {
-  if (headingWatch || typeof window === "undefined") return;
-  headingWatch = true;
-  let absAt = 0;
+  if (typeof window === "undefined") return;
   const apply = (e: DeviceOrientationEvent) => {
     const webkit = (e as DeviceOrientationEvent & { webkitCompassHeading?: number }).webkitCompassHeading;
     const abs = Boolean(e.absolute) || e.type === "deviceorientationabsolute";
     let deg: number | null = null;
     if (typeof webkit === "number" && Number.isFinite(webkit)) {
       deg = webkit;
-      absAt = Date.now();
     } else if (abs && typeof e.alpha === "number" && Number.isFinite(e.alpha)) {
       deg = (360 - e.alpha) % 360;
-      absAt = Date.now();
-    } else if (Date.now() - absAt > 1200 && typeof e.alpha === "number" && Number.isFinite(e.alpha)) {
+    } else if (Date.now() - compassAt > 1200 && typeof e.alpha === "number" && Number.isFinite(e.alpha)) {
       deg = (360 - e.alpha) % 360;
     }
     const beta = e.beta ?? 90;
-    const gamma = e.gamma ?? 90;
-    const flat = Math.abs(beta) < 48 && Math.abs(gamma) < 42;
-    const rideHdg = Date.now() - gpsHdgAt < 2500;
-    if (rideHdg) {
+    const gamma = e.gamma ?? 0;
+    const flat = Math.abs(beta) < 75 && Math.abs(gamma) < 55;
+    if (deg == null) {
       useMapStore.getState().setHeading(useMapStore.getState().headingDeg, flat);
       return;
     }
-    if (deg != null) {
-      if (deg < 0) deg += 360;
-      useMapStore.getState().setHeading(deg, flat);
-    } else useMapStore.getState().setHeading(useMapStore.getState().headingDeg, flat);
+    if (deg < 0) deg += 360;
+    compassAt = Date.now();
+    const prev = useMapStore.getState().headingDeg;
+    if (prev == null || Math.abs(headingDelta(prev, deg)) >= 0.4) headingMovedAt = Date.now();
+    useMapStore.getState().setHeading(deg, flat);
   };
   const DOE = window.DeviceOrientationEvent as unknown as { requestPermission?: () => Promise<string> };
   const bind = () => {
-    window.addEventListener("deviceorientationabsolute", apply as EventListener, true);
-    window.addEventListener("deviceorientation", apply as EventListener, true);
+    if (headingApply) {
+      window.removeEventListener("deviceorientationabsolute", headingApply, true);
+      window.removeEventListener("deviceorientation", headingApply, true);
+    }
+    headingApply = apply as EventListener;
+    window.addEventListener("deviceorientationabsolute", headingApply, true);
+    window.addEventListener("deviceorientation", headingApply, true);
+    headingWatch = true;
   };
   if (typeof DOE?.requestPermission === "function") {
     void DOE.requestPermission()
       .then(() => bind())
       .catch(() => bind());
-  } else bind();
+  } else if (!headingWatch) bind();
 }
 

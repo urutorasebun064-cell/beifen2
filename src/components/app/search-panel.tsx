@@ -361,17 +361,6 @@ export async function applyTrip(origin: StationHit | { lng: number; lat: number 
       const notPassed = (j: Journey) => departDue(j.departHhmm, nowMin) + Math.max(0, j.delayMin ?? 0) >= 0;
       let yahoo = await pullYahoo("1", clock.hour, clock.minute);
       if (!yahoo.length) yahoo = await pullYahoo("1", clock.hour, clock.minute, true);
-      const firstWait = yahoo[0] ? departDue(yahoo[0]!.departHhmm, nowMin) + Math.max(0, yahoo[0]!.delayMin ?? 0) : 99;
-      if (yahoo.length && firstWait > 0) {
-        const prev = (nowMin + 1439) % 1440;
-        const edge = await pullYahoo("1", Math.floor(prev / 60), prev % 60);
-        if (edge.length) {
-          const seen = new Set(yahoo.map((j) => `${j.departHhmm}|${routeShape(j)}`));
-          const add = edge.filter((j) => notPassed(j) && !seen.has(`${j.departHhmm}|${routeShape(j)}`));
-          add.sort((a, b) => departDue(a.departHhmm, nowMin) - departDue(b.departHhmm, nowMin));
-          yahoo = add.concat(yahoo);
-        }
-      }
       let live = yahoo.filter(notPassed);
       if (!live.length) live = yahoo;
       if (!live.length) {
@@ -417,9 +406,8 @@ export async function applyTrip(origin: StationHit | { lng: number; lat: number 
     }
     store.setSearching(false);
     store.setPickField(null);
-    const upcoming = final.find((j) => departDue(j.departHhmm, nowMin) + Math.max(0, j.delayMin ?? 0) >= 0) ?? final[0];
-    const idx = Math.max(0, upcoming ? final.indexOf(upcoming) : 0);
-    store.setJourneys(final, idx);
+    const upcoming = final[0];
+    store.setJourneys(final, 0);
     if (upcoming) lockJourneyTrain(upcoming, { camera: !silent && !skipCamera, keepSheet: false });
     store.setSheetOpen(false);
     void calibrateCorridor(final);

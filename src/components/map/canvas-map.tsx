@@ -1428,7 +1428,7 @@ function remainingJourneySegs(lines: LineRuntime[]) {
         shopTrip && Number.isFinite(leg.from.lng) ? leg.from : locateStation(leg.from.name, lines, index, leg.from);
       const to = shopTrip && Number.isFinite(leg.to.lng) ? leg.to : locateStation(leg.to.name, lines, index, leg.to);
       const shop = shopTrip && i === journey.legs.length - 1;
-      if (shop && useMapStore.getState().stayWalk) continue;
+      if (shop && (useMapStore.getState().stayWalk || useMapStore.getState().destStation?.keys?.includes("place"))) continue;
       const start = shop
         ? from
         : here && haversine([here.lng, here.lat], [to.lng, to.lat]) < haversine([from.lng, from.lat], [to.lng, to.lat]) + 0.02
@@ -4538,6 +4538,21 @@ export function CanvasMap() {
               const [nx, ny] = project(near.station.lng, near.station.lat, camRef.current, w, h);
               if (Number.isFinite(nx) && Number.isFinite(ny)) {
                 drawWalkGuide(ctx, nx, ny, sx, sy, "#ffe08a", near.km * 1000);
+              }
+            }
+          }
+          const placeDest = st.destStation?.keys?.includes("place") ? st.destStation : null;
+          if (placeDest && !stayWalkTo) {
+            const near = stationsNearPlace(st.stationIndex, placeDest.lng, placeDest.lat, 1)[0];
+            const [sx, sy] = project(placeDest.lng, placeDest.lat, camRef.current, w, h);
+            if (Number.isFinite(sx) && Number.isFinite(sy)) {
+              const sc = markScale(placeDest.lng, placeDest.lat, camRef.current, w, h);
+              drawStayPin(ctx, sx, sy, true, sc);
+              if (near) {
+                const [nx, ny] = project(near.station.lng, near.station.lat, camRef.current, w, h);
+                if (Number.isFinite(nx) && Number.isFinite(ny)) {
+                  drawWalkGuide(ctx, nx, ny, sx, sy, "#ffe08a", near.km * 1000);
+                }
               }
             }
           }

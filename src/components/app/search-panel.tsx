@@ -842,28 +842,6 @@ function railOf(hit: StationHit | { lng: number; lat: number }): StationHit | nu
   return nearestRailStop(hit.lng, hit.lat);
 }
 
-function stayFromPlace(hit: StationHit): Stay {
-  return {
-    id: `addr:${hit.lng.toFixed(5)},${hit.lat.toFixed(5)}`,
-    name: hit.name,
-    nameZh: hit.name,
-    nameEn: hit.name,
-    address: hit.name,
-    addressZh: hit.name,
-    addressEn: hit.name,
-    regionJa: hit.prefecture || "",
-    regionZh: hit.prefecture || "",
-    regionEn: hit.prefecture || "",
-    kindJa: "住所",
-    kindZh: "地址",
-    kindEn: "Address",
-    lng: hit.lng,
-    lat: hit.lat,
-    url: "",
-    photos: [],
-  };
-}
-
 export async function applyPlaceTrip(
   origin: StationHit | { lng: number; lat: number },
   dest: StationHit,
@@ -883,10 +861,10 @@ export async function applyPlaceTrip(
     ? (fromNear?.station as StationHit | undefined) ?? nearestRailStop(loc.lng, loc.lat)
     : railOf(origin);
   const railTo = destPlace ? (toNear?.station as StationHit | undefined) ?? nearestRailStop(dest.lng, dest.lat) : dest;
-  if (destPlace) {
-    s.selectStay(stayFromPlace(dest));
-    s.setStayLayer(true);
-    s.setStayWalk(true);
+  if (destPlace || originPlace) {
+    s.selectStay(null);
+    s.setStayWalk(false);
+    s.setStayLayer(false);
   }
   s.selectTrain(null);
   s.setFollowTrainId(null);
@@ -944,7 +922,10 @@ export async function applyPlaceTrip(
   st.setDest(dest);
   st.selectStation(dest);
   if (!opts?.skipCamera) st.requestFlyTo({ lng: dest.lng, lat: dest.lat, zoom: 14.8, bearing: 0, pitch: 0.55, center: true });
-  if (!opts?.silent) st.setSearching(false);
+  if (!opts?.silent) {
+    st.setSearching(false);
+    st.setSheetOpen(true);
+  }
 }
 
 export async function applyStayTrip(stay: Stay) {

@@ -1261,8 +1261,8 @@ export function PartyWindow() {
   if (joined && collapsed) return null;
 
   return (
-    <div className="absolute inset-0 z-40 flex items-end justify-center bg-bg/50 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] md:items-center">
-      <div className={`rpg-frame flex w-full max-w-md flex-col overflow-hidden ${joined ? "h-[min(78vh,36rem)]" : "max-h-[78vh]"}`}>
+    <div className="pointer-events-none absolute inset-0 z-40 flex items-end justify-center p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+      <div className={`pointer-events-auto rpg-frame flex w-full max-w-md flex-col overflow-hidden ${joined ? "h-[min(78vh,36rem)]" : "max-h-[78vh]"}`}>
         <div className="flex items-center justify-between border-b-2 border-fg px-3 py-2.5">
           <p className="flex min-w-0 items-center gap-0.5 text-sm font-medium text-fg">
             {joined ? (

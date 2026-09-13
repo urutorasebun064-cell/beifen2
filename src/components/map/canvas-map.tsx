@@ -5304,7 +5304,7 @@ export function CanvasMap() {
   return (
     <div ref={wrapRef} className="absolute inset-0 h-full w-full overflow-hidden overscroll-none bg-bg">
       <canvas ref={canvasRef} className="block h-full w-full touch-none" aria-label="map" />
-      <div className="pointer-events-auto absolute top-[max(0.7rem,env(safe-area-inset-top))] right-2 z-40 flex w-[6.75rem] flex-col items-center gap-1.5">
+      <div className="pointer-events-auto absolute top-[max(0.7rem,env(safe-area-inset-top))] right-2 z-50 flex w-[6.75rem] flex-col items-center gap-1.5">
         <LangSwitch />
         <p className="text-[11px] leading-none font-medium tabular-nums tracking-tight text-fg">{clock}</p>
         <div className="flex w-full justify-center gap-1">

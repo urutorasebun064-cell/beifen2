@@ -10,70 +10,33 @@ function ymdTokyo(at = new Date()) {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit", day: "2-digit" }).format(at);
 }
 
-function yahooName(name: string, _pf = "") {
-  return name.replace(/駅$/u, "").trim();
+function yahooName(name: string, pf: string) {
+  const n = name.replace(/駅$/u, "").trim();
+  const p = pf.trim();
+  return p ? `${n}(${p})` : n;
 }
 
 function shortPf(pf: string) {
   return pf.replace(/[都道府県]$/u, "").trim();
 }
 
-function nameForms(name: string, pf = "") {
+function nameForms(name: string, pf: string) {
   const n = name.replace(/駅$/u, "").trim();
   const ke = n.replace(/ヶ/g, "ケ");
   const ge = n.replace(/ケ/g, "ヶ");
-  const p = shortPf(pf);
   const out: string[] = [];
   const add = (x: string) => {
     const v = x.trim();
     if (v && !out.includes(v)) out.push(v);
   };
-  if (p) {
-    add(`${n}（${p}）`);
-    add(`${n}（${p}県）`);
-  }
+  add(yahooName(n, pf));
+  add(yahooName(n, shortPf(pf)));
   add(n);
-  add(`${n}駅`);
+  add(yahooName(ke, pf));
   add(ke);
+  add(yahooName(ge, pf));
   add(ge);
-  return out.slice(0, 6);
-}
-
-function stopStem(s: string) {
-  let t = String(s || "").trim().split("/")[0]!.trim();
-  t = t.replace(/駅$/u, "").replace(/[（(][^）)]{1,12}[）)]$/u, "").replace(/駅$/u, "");
-  return t.trim();
-}
-
-function prefTag(s: string) {
-  const m = s.match(/[（(]([^）)]{1,12})[）)]$/u);
-  return m ? m[1]!.replace(/[都道府県]$/u, "") : "";
-}
-
-function sameStop(a: string, b: string) {
-  return stopStem(a) === stopStem(b);
-}
-
-function stopMatches(stopName: string, want: RouteStop) {
-  if (!sameStop(stopName, want.name)) return false;
-  const tagged = prefTag(stopName);
-  const p = shortPf(want.prefecture || "");
-  if (tagged && p && tagged !== p) return false;
-  return true;
-}
-
-function journeysForStations(list: Journey[], origin: RouteStop, dest: RouteStop) {
-  return list.filter((j) => {
-    if (!j.legs.length) return false;
-    const first = j.legs[0]!;
-    const last = j.legs[j.legs.length - 1]!;
-    const rides = j.legs.filter((l) => l.kind === "ride");
-    if (!rides.length) return false;
-    const startOk = stopMatches(first.from.name, origin) || stopMatches(rides[0]!.from.name, origin);
-    const endOk = stopMatches(last.to.name, dest) || stopMatches(rides[rides.length - 1]!.to.name, dest);
-    if (first.kind === "walk" && (first.minutes ?? 0) >= 12 && !startOk) return false;
-    return startOk && endOk;
-  });
+  return out.slice(0, 4);
 }
 
 function parseHhmm(s: string | undefined) {
@@ -137,7 +100,7 @@ async function yahooPage(
       "User-Agent": "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/120.0.0.0 Mobile Safari/537.36",
       "Accept-Language": "ja",
     },
-    signal: AbortSignal.timeout(18000),
+    signal: AbortSignal.timeout(10000),
   });
   if (!res.ok) return { journeys: [], fromList: [], toList: [] };
   const html = await res.text();
@@ -161,18 +124,15 @@ function stationLists(html: string): { fromList: St[]; toList: St[] } {
 function pickCode(list: St[], pf: string, name: string) {
   if (!list.length) return "";
   const p = shortPf(pf);
-  const n = stopStem(name);
+  const n = name.replace(/駅$/u, "").trim();
   const blob = (x: St) => `${x.name ?? ""}${x.label ?? ""}`;
-  const stem = (x: St) => stopStem(x.name ?? "") || stopStem(x.label ?? "");
-  const exact = list.filter((x) => stem(x) === n);
-  if (!exact.length) return "";
   const hit =
-    exact.find((x) => p && blob(x).includes(p)) ??
-    exact.find((x) => pf && blob(x).includes(pf)) ??
-    (exact.length === 1 ? exact[0] : undefined);
-  if (!hit) return "";
-  if (hit.code) return `,,${hit.code}`;
-  return hit.value && /,,\d/.test(hit.value) ? hit.value : "";
+    list.find((x) => p && blob(x).includes(p)) ??
+    list.find((x) => pf && blob(x).includes(pf)) ??
+    list.find((x) => (x.name ?? "").replace(/駅$/u, "") === n) ??
+    list.find((x) => x.code);
+  if (hit?.code) return `,,${hit.code}`;
+  return hit?.value && /,,\d/.test(hit.value) ? hit.value : "";
 }
 
 export const Route = createFileRoute("/api/transit")({
@@ -228,29 +188,43 @@ export const Route = createFileRoute("/api/transit")({
             if (pairs.some((p) => p.from === f && p.to === t && (p.extra?.flatlon ?? "") === (extra?.flatlon ?? "") && (p.extra?.tlatlon ?? "") === (extra?.tlatlon ?? ""))) return;
             pairs.push({ from: f, to: t, extra });
           };
-          addPair(froms[0] ?? fromQ, tos[0] ?? toQ);
           addPair(fromQ, toQ);
-          addPair(froms[1] ?? `${fromQ}駅`, tos[1] ?? `${toQ}駅`);
-          let usedExtra: { flatlon?: string; tlatlon?: string } | undefined;
+          addPair(froms[1] ?? fromQ, tos[1] ?? toQ);
+          addPair(froms[2] ?? from.replace(/駅$/u, ""), tos[2] ?? to.replace(/駅$/u, ""));
           for (const pair of pairs) {
             usedFrom = pair.from;
             usedTo = pair.to;
-            usedExtra = pair.extra;
             const page = await yahooPage(usedFrom, usedTo, y ?? "", mo ?? "", d ?? "", hh, mm, type, origin, dest, pair.extra);
-            let rows = journeysForStations(page.journeys, origin, dest);
+            first = page.journeys;
+            if (first.length) break;
             const fc = pickCode(page.fromList, opf, from);
             const tc = pickCode(page.toList, dpf, to);
             if (fc || tc) {
-              usedExtra = {
-                flatlon: fc || pair.extra?.flatlon,
-                tlatlon: tc || pair.extra?.tlatlon,
-              };
-              const coded = await yahooPage(usedFrom, usedTo, y ?? "", mo ?? "", d ?? "", hh, mm, type, origin, dest, usedExtra);
-              const codedRows = journeysForStations(coded.journeys, origin, dest);
-              if (codedRows.length) rows = codedRows;
+              const coded = await yahooPage(usedFrom, usedTo, y ?? "", mo ?? "", d ?? "", hh, mm, type, origin, dest, {
+                flatlon: fc || undefined,
+                tlatlon: tc || undefined,
+              });
+              if (coded.journeys.length) {
+                first = coded.journeys;
+                break;
+              }
             }
-            first = rows;
-            if (first.length) break;
+          }
+          if (type === "1" && first.length) {
+            const last = parseHhmm(first[first.length - 1]?.departHhmm);
+            if (last && first.length < 5) {
+              const n = bumpMinute(last.hh, last.mm, 1);
+              const extra = await yahooPage(usedFrom, usedTo, y ?? "", mo ?? "", d ?? "", n.hh, n.mm, "1", origin, dest);
+              if (extra.journeys.length) {
+                const seen = new Set(first.map(jid));
+                for (const j of extra.journeys) {
+                  const id = jid(j);
+                  if (seen.has(id)) continue;
+                  seen.add(id);
+                  first.push(j);
+                }
+              }
+            }
           }
           const dia = await diaP.catch(() => []);
           const journeys = first.slice(0, 6).map((j) => stampYahooDia(j, dia));

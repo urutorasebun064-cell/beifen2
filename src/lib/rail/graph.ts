@@ -131,6 +131,7 @@ export function normStation(n: string) {
   return toJa(n)
     .replace(/[駅站]$/u, "")
     .replace(/\s+/g, "")
+    .replace(/ヶ/g, "ケ")
     .trim();
 }
 
@@ -284,6 +285,16 @@ export function locateStation(
     }
   }
   if (matches.length) {
+    const pfWant = (fallback.prefecture || "").replace(/[都道府県]$/u, "");
+    const tag = (name.match(/[（(]([^）)]{1,12})[）)]/u)?.[1] ?? "").replace(/[都道府県]$/u, "");
+    const want = tag || pfWant;
+    const byPf = want
+      ? matches.filter((m) => {
+          const p = (m.prefecture || "").replace(/[都道府県]$/u, "");
+          return p === want || p.startsWith(want) || want.startsWith(p);
+        })
+      : [];
+    const pool = byPf.length ? byPf : matches;
     const hint =
       Number.isFinite(fallback.lng) &&
       Number.isFinite(fallback.lat) &&
@@ -292,14 +303,11 @@ export function locateStation(
       fallback.lat > 24 &&
       fallback.lat < 46;
     if (hint) {
-      matches.sort(
+      pool.sort(
         (a, b) => Math.hypot(a.lng - fallback.lng, a.lat - fallback.lat) - Math.hypot(b.lng - fallback.lng, b.lat - fallback.lat),
       );
-      const closest = matches[0]!;
-      if (Math.hypot(closest.lng - fallback.lng, closest.lat - fallback.lat) < 0.08) return closest;
-      return { name: fallback.name || closest.name, lng: fallback.lng, lat: fallback.lat, prefecture: fallback.prefecture };
     }
-    return matches[0]!;
+    return pool[0]!;
   }
   return { ...fallback, name: name || fallback.name };
 }
@@ -660,6 +668,38 @@ export function attachTrack(journey: Journey, lines: LineRuntime[], index: Map<s
       path: routed.path,
     };
   });
+  for (let i = 0; i < legs.length; i++) {
+    const leg = legs[i]!;
+    const fromHint = i === 0 ? journey.origin : legs[i - 1]!.to;
+    const toHint = i === legs.length - 1 ? journey.dest : legs[i + 1]!.from;
+    const from = locateStation(leg.from.name, lines, index, Number.isFinite(leg.from.lng) && leg.from.lng > 122 ? leg.from : fromHint);
+    const to = locateStation(leg.to.name, lines, index, Number.isFinite(leg.to.lng) && leg.to.lng > 122 ? leg.to : toHint);
+    if (from.lng === leg.from.lng && from.lat === leg.from.lat && to.lng === leg.to.lng && to.lat === leg.to.lat) continue;
+    if (leg.kind !== "ride") {
+      legs[i] = {
+        ...leg,
+        from,
+        to,
+        stops: [from, to],
+        path: [
+          [from.lng, from.lat],
+          [to.lng, to.lat],
+        ],
+      };
+      continue;
+    }
+    const routed = densifyRailPath(from, to, lines, index, { ...leg, from, to });
+    legs[i] = {
+      ...leg,
+      from,
+      to,
+      lineId: leg.lineId ?? routed.line?.id,
+      lineName: leg.lineName ?? routed.line?.name,
+      color: leg.color ?? routed.line?.color,
+      stops: routed.stops.length ? routed.stops : [from, to],
+      path: routed.path,
+    };
+  }
   return { ...journey, legs };
 }
 

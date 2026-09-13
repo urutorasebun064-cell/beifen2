@@ -20,7 +20,7 @@ const VAPID_FILE = join(process.cwd(), ".data", "party-vapid.json");
 type PushSub = { endpoint: string; p256dh: string; auth: string };
 type Member = { id: string; nick: string; token: string; last: number; online: boolean; host?: boolean; lng?: number; lat?: number; pinAt?: number; near?: string; pinOff?: boolean; push?: PushSub };
 type Msg = { id: number; nick: string; body: string; at: string; uid?: string; tr?: { ja?: string; en?: string; zh?: string } };
-type Room = { name: string; pass: string; hostId: string; members: Member[]; messages: Msg[]; msgId: number; msgTotal: number; expiresAt: number; born?: number; boundNicks?: Record<string, string>; clearedAt?: number; memRev?: number };
+type Room = { name: string; pass: string; hostId: string; members: Member[]; messages: Msg[]; msgId: number; msgTotal: number; expiresAt: number; born?: number; boundNicks?: Record<string, string>; clearedAt?: number; memRev?: number; leftIds?: string[] };
 type Saved = Room & { key: string };
 
 type G = typeof globalThis & { __jbPartyRooms?: Map<string, Room>; __jbPartyGone?: Map<string, number> };
@@ -214,7 +214,7 @@ async function pingPush(room: Room, exceptId: string) {
       }),
   );
   if (!jobs.length) return;
-  await Promise.race([Promise.allSettled(jobs), new Promise((r) => setTimeout(r, 8000))]);
+  await Promise.race([Promise.allSettled(jobs), new Promise((r) => setTimeout(r, 2500))]);
 }
 
 function loadGoneFile() {
@@ -430,10 +430,10 @@ function sameRoom(a: string, b: string) {
 }
 
 function packMembers(room: Room) {
-  return JSON.stringify({ v: 2, members: room.members, nicks: room.boundNicks || {}, rev: room.memRev || 0 });
+  return JSON.stringify({ v: 2, members: room.members, nicks: room.boundNicks || {}, rev: room.memRev || 0, left: room.leftIds || [] });
 }
 
-function unpackMembers(raw: unknown): { members: Member[]; nicks: Record<string, string>; rev: number } {
+function unpackMembers(raw: unknown): { members: Member[]; nicks: Record<string, string>; rev: number; left: string[] } {
   let v: unknown = raw;
   if (typeof raw === "string") {
     try {
@@ -443,14 +443,15 @@ function unpackMembers(raw: unknown): { members: Member[]; nicks: Record<string,
     }
   }
   if (v && typeof v === "object" && !Array.isArray(v) && Array.isArray((v as { members?: unknown }).members)) {
-    const rec = v as { members: unknown; nicks?: Record<string, string>; rev?: number };
+    const rec = v as { members: unknown; nicks?: Record<string, string>; rev?: number; left?: string[] };
     return {
       members: asList<Member>(rec.members),
       nicks: rec.nicks && typeof rec.nicks === "object" ? rec.nicks : {},
       rev: Number(rec.rev) || 0,
+      left: Array.isArray(rec.left) ? rec.left.map(String).filter(Boolean).slice(-80) : [],
     };
   }
-  return { members: asList<Member>(raw), nicks: {}, rev: 0 };
+  return { members: asList<Member>(raw), nicks: {}, rev: 0, left: [] };
 }
 
 function asList<T>(raw: unknown): T[] {
@@ -512,7 +513,28 @@ function normalizeRoom(row: Partial<Room> & { name: string }): Room {
     boundNicks: row.boundNicks && typeof row.boundNicks === "object" ? { ...row.boundNicks } : {},
     clearedAt: Number(row.clearedAt) || 0,
     memRev: Number((row as Room).memRev) || 0,
+    leftIds: Array.isArray((row as Room).leftIds) ? (row as Room).leftIds!.map(String).filter(Boolean).slice(-80) : [],
   };
+}
+
+function dropLeft(room: Room) {
+  const left = new Set(room.leftIds || []);
+  if (!left.size) return;
+  room.members = room.members.filter((m) => !left.has(m.id) && !(m.token && left.has(m.token)));
+}
+
+function markLeft(room: Room, ids: string[]) {
+  const bag = new Set(room.leftIds || []);
+  for (const id of ids) if (id) bag.add(id);
+  room.leftIds = [...bag].slice(-80);
+  dropLeft(room);
+}
+
+function unmarkLeft(room: Room, ids: string[]) {
+  if (!room.leftIds?.length) return;
+  const drop = new Set(ids.filter(Boolean));
+  if (!drop.size) return;
+  room.leftIds = room.leftIds.filter((id) => !drop.has(id));
 }
 
 function unionMsgs(a: Msg[], b: Msg[]) {
@@ -532,6 +554,7 @@ function mergeRoom(key: string, incoming: Room) {
   if (!cur) {
     seedBound(next);
     rooms.set(key, next);
+    dropLeft(next);
     collapseMembers(next);
     return next;
   }
@@ -557,7 +580,8 @@ function mergeRoom(key: string, incoming: Room) {
   if (next.expiresAt && next.expiresAt > (cur.expiresAt || 0)) cur.expiresAt = next.expiresAt;
   const nextRev = Number(next.memRev) || 0;
   const curRev = Number(cur.memRev) || 0;
-  if (nextRev >= curRev) {
+  cur.leftIds = [...new Set([...(cur.leftIds || []), ...(next.leftIds || [])])].slice(-80);
+  if (nextRev > curRev) {
     cur.members = next.members.slice();
     cur.memRev = nextRev;
     if (next.hostId) cur.hostId = next.hostId;
@@ -591,6 +615,7 @@ function mergeRoom(key: string, incoming: Room) {
       }
     }
   }
+  dropLeft(cur);
   collapseMembers(cur);
   for (const m of cur.members) m.host = m.id === cur.hostId;
   return cur;
@@ -765,6 +790,7 @@ async function hydrateSql() {
             expiresAt: Number.isFinite(exp) ? exp : seedTtl(),
             boundNicks: packed.nicks,
             memRev: packed.rev,
+            leftIds: packed.left,
           }),
         );
       }
@@ -925,6 +951,7 @@ function collapseMembers(room: Room, keepId?: string) {
 }
 
 function publicOf(room: Room, touchId?: string, was = "") {
+  dropLeft(room);
   markAway(room);
   trimMessages(room);
   if (touchId) {
@@ -1091,6 +1118,7 @@ async function kickFromOthers(uid: string, token: string, keepKey: string) {
 }
 
 function takeSeat(room: Room, nick: string, token: string, uid: string, was = "") {
+  unmarkLeft(room, [uid, token]);
   markAway(room);
   seedBound(room);
   const keep = keptNick(room, uid, token);
@@ -1179,6 +1207,7 @@ export const Route = createFileRoute("/api/party")({
           const rows = [...rooms.entries()]
             .filter(([k, r]) => {
               if (stillGone(k) || expired(r)) return false;
+              dropLeft(r);
               collapseMembers(r);
               markAway(r);
               return true;
@@ -1304,21 +1333,19 @@ export const Route = createFileRoute("/api/party")({
         const room = found.room;
         if (!room || expired(room) || stillGone(found.key)) return json({ ok: false, error: "missing" }, 404);
         const me = findMember(room, token, uid);
-        if (!me) return json({ ok: false, error: "auth" }, 403);
-
         if (action === "leave") {
-          room.members = room.members.filter((m) => m.id !== me.id && m.token !== me.token && !(uid && m.id === uid));
+          const ids = [me?.id, me?.token, uid, token].filter(Boolean);
+          markLeft(room, ids);
           for (const m of room.members) m.host = m.id === room.hostId;
           room.memRev = (room.memRev || 0) + 1;
-          await forgetPush(found.key, me.id);
-          if (found.key !== keyOf(room.name)) await forgetPush(keyOf(room.name), me.id);
-          if (uid) {
-            await forgetPush(found.key, uid);
-            if (found.key !== keyOf(room.name)) await forgetPush(keyOf(room.name), uid);
+          for (const id of ids) {
+            await forgetPush(found.key, id);
+            if (found.key !== keyOf(room.name)) await forgetPush(keyOf(room.name), id);
           }
           await saveRoom(found.key, room);
           return json({ ok: true });
         }
+        if (!me) return json({ ok: false, error: "auth" }, 403);
         me.last = Date.now();
         me.online = true;
         if (nickRaw && !me.nick) {
@@ -1355,6 +1382,7 @@ export const Route = createFileRoute("/api/party")({
           trimMessages(room);
           bumpTtl(room);
           await saveRoom(found.key, room);
+          const pushP = pingPush(room, me.id).catch(() => undefined);
           void (async () => {
             try {
               const [ja, en, zh] = await Promise.all([translateOne(text, "ja"), translateOne(text, "en"), translateOne(text, "zh")]);
@@ -1365,7 +1393,7 @@ export const Route = createFileRoute("/api/party")({
               /* */
             }
           })();
-          void pingPush(room, me.id).catch(() => undefined);
+          await pushP;
           return json({ ok: true, vapid: await vapidOut(), ...publicOf(room, me.id, was), you: me.nick, youId: me.id, host: me.id === room.hostId });
         }
         if (action === "share") {

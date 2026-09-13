@@ -64,8 +64,26 @@ function railColor(name: string): string {
   return "#7ec8e3";
 }
 
-function stop(name: string, fallback: RouteStop): RouteStop {
-  return { name: name || fallback.name, lng: fallback.lng, lat: fallback.lat, prefecture: fallback.prefecture };
+function prefOfName(name: string) {
+  const m = String(name || "").match(/[（(]([^）)]{1,12})[）)]$/u);
+  return m ? m[1]!.replace(/[都道府県]$/u, "") : "";
+}
+
+function sameStem(a: string, b: string) {
+  const x = a.replace(/駅$/u, "").replace(/[（(][^）)]{1,12}[）)]$/u, "").trim();
+  const y = b.replace(/駅$/u, "").replace(/[（(][^）)]{1,12}[）)]$/u, "").trim();
+  return Boolean(x && y) && x === y;
+}
+
+function stop(name: string, origin: RouteStop, dest: RouteStop): RouteStop {
+  const raw = name || "";
+  if (raw && (sameStem(raw, origin.name) || raw === origin.name)) {
+    return { name: raw, lng: origin.lng, lat: origin.lat, prefecture: origin.prefecture };
+  }
+  if (raw && (sameStem(raw, dest.name) || raw === dest.name)) {
+    return { name: raw, lng: dest.lng, lat: dest.lat, prefecture: dest.prefecture };
+  }
+  return { name: raw, lng: 0, lat: 0, prefecture: prefOfName(raw) };
 }
 
 function numFrom(v: unknown): string | undefined {
@@ -273,8 +291,8 @@ function featureToJourney(feat: YahooFeature, origin: RouteStop, dest: RouteStop
     const b = edges[i + 1]!;
     const rail = a.railName ?? "";
     const walk = isWalk(rail);
-    const from = stop(a.stationName || a.pointName || origin.name, origin);
-    const to = stop(b.stationName || b.pointName || dest.name, dest);
+    const from = stop(a.stationName || a.pointName || origin.name, origin, dest);
+    const to = stop(b.stationName || b.pointName || dest.name, origin, dest);
     const dep = pickTime(a, "dep");
     const arr = pickTime(b, "arr") ?? pickTime(b, "dep");
     const minutes = Math.max(1, clockSpan(dep, arr) || 1);

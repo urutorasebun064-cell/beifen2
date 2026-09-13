@@ -244,7 +244,7 @@ async function bindPush(room: string, token: string, vapid?: string) {
   try {
     if (Notification.permission === "default") await Notification.requestPermission();
     if (Notification.permission !== "granted") return false;
-    await navigator.serviceWorker.register("/sw.js?v=28", { scope: "/", updateViaCache: "none" });
+    await navigator.serviceWorker.register("/sw.js?v=29", { scope: "/", updateViaCache: "none" });
     const reg = await navigator.serviceWorker.ready;
     await reg.update().catch(() => undefined);
     const key = url64(vapid);
@@ -447,7 +447,8 @@ async function partyNotify(preview = "•") {
   markUnread();
   pingChat();
   const s = useMapStore.getState();
-  if (!s.partyCollapsed && s.partyMenuOpen && document.visibilityState === "visible") return;
+  const viewing = !s.partyCollapsed && s.partyMenuOpen && document.visibilityState === "visible";
+  if (viewing) return;
   if (document.visibilityState === "visible") return;
   try {
     if (!("Notification" in window) || Notification.permission !== "granted") return;
@@ -763,6 +764,7 @@ export function PartyWindow() {
             if (fresh.length) {
               const row = fresh[fresh.length - 1]!;
               void partyNotify(`${row.nick}: ${(row.body || "•").slice(0, 40)}`);
+              saveSeen(roomName, top);
             } else markUnread();
           }
           if (top) lastHeardRef.current = top;
@@ -780,9 +782,6 @@ export function PartyWindow() {
                   }
                 : m,
             );
-            if (!data.members.some((m) => m.id === mine || m.nick === who)) {
-              data.members = data.members.concat([{ id: mine, nick: who, lng: keep.lng, lat: keep.lat, near: keep.near, online: true }]);
-            }
           }
           if (shareOffRef.current && Array.isArray(data.members)) {
             const mine = userId();
@@ -1102,7 +1101,17 @@ export function PartyWindow() {
   };
 
   const leave = () => {
-    if (joined && token) void partyPost({ action: "leave", room: joined, token, nick: nickRef.current || nick });
+    const roomName = joined;
+    const tok = token;
+    const who = nickRef.current || nick;
+    if (roomName) {
+      const body = JSON.stringify({ action: "leave", room: roomName, token: tok, nick: who, uid: userId() });
+      try {
+        navigator.sendBeacon("/api/party", new Blob([body], { type: "application/json" }));
+      } catch {
+        void partyPost({ action: "leave", room: roomName, token: tok, nick: who });
+      }
+    }
     saveLast(joined || room, passRef.current, nickRef.current || nick);
     clearSession();
     setJoined("");

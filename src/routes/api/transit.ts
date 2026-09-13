@@ -18,20 +18,25 @@ function shortPf(pf: string) {
   return pf.replace(/[都道府県]$/u, "").trim();
 }
 
-function nameForms(name: string, _pf = "") {
+function nameForms(name: string, pf = "") {
   const n = name.replace(/駅$/u, "").trim();
   const ke = n.replace(/ヶ/g, "ケ");
   const ge = n.replace(/ケ/g, "ヶ");
+  const p = shortPf(pf);
   const out: string[] = [];
   const add = (x: string) => {
     const v = x.trim();
     if (v && !out.includes(v)) out.push(v);
   };
+  if (p) {
+    add(`${n}（${p}）`);
+    add(`${n}（${p}県）`);
+  }
   add(n);
   add(`${n}駅`);
   add(ke);
   add(ge);
-  return out.slice(0, 4);
+  return out.slice(0, 6);
 }
 
 function stopStem(s: string) {
@@ -223,9 +228,9 @@ export const Route = createFileRoute("/api/transit")({
             if (pairs.some((p) => p.from === f && p.to === t && (p.extra?.flatlon ?? "") === (extra?.flatlon ?? "") && (p.extra?.tlatlon ?? "") === (extra?.tlatlon ?? ""))) return;
             pairs.push({ from: f, to: t, extra });
           };
+          addPair(froms[0] ?? fromQ, tos[0] ?? toQ);
           addPair(fromQ, toQ);
           addPair(froms[1] ?? `${fromQ}駅`, tos[1] ?? `${toQ}駅`);
-          addPair(froms[2] ?? fromQ, tos[2] ?? toQ);
           let usedExtra: { flatlon?: string; tlatlon?: string } | undefined;
           for (const pair of pairs) {
             usedFrom = pair.from;

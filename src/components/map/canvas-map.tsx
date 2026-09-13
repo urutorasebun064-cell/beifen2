@@ -24,7 +24,7 @@ import {
 import type { Journey, LineRuntime, RouteLeg, StationHit, Train } from "@/lib/rail/types";
 import { Button } from "@/components/ui/button";
 import { applyMateTrip, calibrateTrain, calibrateStation, fillPickedStation, locateUser, noteStreetZoom } from "@/components/app/search-panel";
-import { findLineForLeg, locateStation, sliceRailPath } from "@/lib/rail/graph";
+import { chainRailPath, findLineForLeg, locateStation, sliceRailPath } from "@/lib/rail/graph";
 import { placeTrainOnLeg, stopIndexByName } from "@/lib/rail/timetable-snap";
 import { arrivalCompare, journeyGuide, rideHeadline } from "@/components/app/route-panel";
 import { focusStay } from "@/components/app/stay-catalog";
@@ -1156,6 +1156,7 @@ function stopKey(name: string) {
     .replace(/[（(][^）)]{0,40}[）)]/gu, "")
     .replace(/^モノレール/u, "")
     .replace(/[　\s]+/gu, "")
+    .replace(/ヶ/g, "ケ")
     .trim();
 }
 
@@ -1464,16 +1465,22 @@ function remainingJourneySegs(lines: LineRuntime[]) {
         const found = findLineForLeg(lines, index, hinted);
         if (found && (!prefer || linePrefers(found, prefer))) line = found;
       }
-      const take = (next: [number, number][], nextLine?: LineRuntime | null) => {
-        if (!pathFitsLeg(next, fromPt, toPt)) return false;
+      const take = (next: [number, number][], nextLine?: LineRuntime | null, strict = true) => {
+        if (next.length < 2) return false;
+        if (strict && !pathFitsLeg(next, fromPt, toPt)) return false;
         pts = next;
         if (nextLine) line = nextLine;
         return true;
       };
-      take(rideGlowPath(line, fromPt.name, toPt.name), line);
-      if (pts.length < 2 && line) take(sliceRailPath(line, fromPt, toPt), line);
-      if (pts.length < 2 && namedOk && named) take(rideGlowPath(named, fromPt.name, toPt.name), named);
-      if (pts.length < 2 && leg.path && leg.path.length >= 2) take(leg.path.slice());
+      if (namedOk && named) take(rideGlowPath(named, fromPt.name, toPt.name), named, false);
+      if (pts.length < 2) take(rideGlowPath(line, fromPt.name, toPt.name), line, false);
+      if (pts.length < 2 && line) take(sliceRailPath(line, fromPt, toPt), line, false);
+      if (pts.length < 2 && named) take(sliceRailPath(named, fromPt, toPt), named, false);
+      if (pts.length < 2 && leg.path && leg.path.length >= 2) take(leg.path.slice(), line, false);
+      if (pts.length < 2) {
+        const chained = chainRailPath(fromPt.name, toPt.name, lines, leg.lineName ?? "", fromPt, toPt);
+        take(chained, line, false);
+      }
     }
     if (pts.length < 2) continue;
     segs.push({ color: line?.color || leg.color || CREAM, pts: slimPath(pts), walk: false, clip: false });

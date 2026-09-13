@@ -5,3 +5,12 @@ export function odptKeyFrom(request: Request): string {
 export function googleKeyFrom(request: Request): string {
   return request.headers.get("x-google-key")?.trim() || process.env.GOOGLE_MAPS_API_KEY?.trim() || "";
 }
+
+export function mapboxKeyFrom(request: Request): string {
+  return (
+    request.headers.get("x-mapbox-key")?.trim() ||
+    process.env.MAPBOX_ACCESS_TOKEN?.trim() ||
+    process.env.MAPBOX_TOKEN?.trim() ||
+    ""
+  );
+}

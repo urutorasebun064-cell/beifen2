@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as ApiGeocodeRouteImport } from './routes/api/geocode'
 import { Route as ApiGoogleRouteImport } from './routes/api/google'
 import { Route as ApiJrRouteImport } from './routes/api/jr'
 import { Route as ApiLiveRouteImport } from './routes/api/live'
@@ -27,6 +28,11 @@ import { Route as ApiKonbiniStoresRouteImport } from './routes/api/konbini/store
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiGeocodeRoute = ApiGeocodeRouteImport.update({
+  id: '/api/geocode',
+  path: '/api/geocode',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiGoogleRoute = ApiGoogleRouteImport.update({
@@ -97,6 +103,7 @@ const ApiKonbiniStoresRoute = ApiKonbiniStoresRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/api/geocode': typeof ApiGeocodeRoute
   '/api/google': typeof ApiGoogleRoute
   '/api/jr': typeof ApiJrRoute
   '/api/live': typeof ApiLiveRoute
@@ -113,6 +120,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/api/geocode': typeof ApiGeocodeRoute
   '/api/google': typeof ApiGoogleRoute
   '/api/jr': typeof ApiJrRoute
   '/api/live': typeof ApiLiveRoute
@@ -130,6 +138,7 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/api/geocode': typeof ApiGeocodeRoute
   '/api/google': typeof ApiGoogleRoute
   '/api/jr': typeof ApiJrRoute
   '/api/live': typeof ApiLiveRoute
@@ -148,6 +157,7 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/api/geocode'
     | '/api/google'
     | '/api/jr'
     | '/api/live'
@@ -164,6 +174,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/api/geocode'
     | '/api/google'
     | '/api/jr'
     | '/api/live'
@@ -180,6 +191,7 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
+    | '/api/geocode'
     | '/api/google'
     | '/api/jr'
     | '/api/live'
@@ -197,6 +209,7 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  ApiGeocodeRoute: typeof ApiGeocodeRoute
   ApiGoogleRoute: typeof ApiGoogleRoute
   ApiJrRoute: typeof ApiJrRoute
   ApiLiveRoute: typeof ApiLiveRoute
@@ -219,6 +232,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/geocode': {
+      id: '/api/geocode'
+      path: '/api/geocode'
+      fullPath: '/api/geocode'
+      preLoaderRoute: typeof ApiGeocodeRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/google': {
@@ -317,6 +337,7 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  ApiGeocodeRoute: ApiGeocodeRoute,
   ApiGoogleRoute: ApiGoogleRoute,
   ApiJrRoute: ApiJrRoute,
   ApiLiveRoute: ApiLiveRoute,

@@ -294,17 +294,19 @@ function liveJourneys(origin: StationHit | { lng: number; lat: number }, dest: S
   return out;
 }
 
-export async function applyTrip(origin: StationHit | { lng: number; lat: number }, dest: StationHit, opts?: { silent?: boolean; skipCamera?: boolean }) {
+export async function applyTrip(origin: StationHit | { lng: number; lat: number }, dest: StationHit, opts?: { silent?: boolean; skipCamera?: boolean; skipPins?: boolean }) {
   origin = asSearchOrigin(origin);
-  if ("name" in origin && stationKey(origin) === stationKey(dest)) {
-    useMapStore.getState().setDest(dest);
+  if ("name" in origin && stationKey(origin) === stationKey(dest) && !isPlace(origin) && !isPlace(dest)) {
+    if (!opts?.skipPins) useMapStore.getState().setDest(dest);
     useMapStore.getState().setJourneys([]);
     return;
   }
   const silent = Boolean(opts?.silent);
   const skipCamera = Boolean(opts?.skipCamera);
-  if ("name" in origin && origin.name) useMapStore.getState().setOrigin(origin);
-  useMapStore.getState().setDest(dest);
+  if (!opts?.skipPins) {
+    if ("name" in origin && origin.name) useMapStore.getState().setOrigin(origin);
+    useMapStore.getState().setDest(dest);
+  }
   if (!silent) {
     useMapStore.getState().setSearching(true);
     useMapStore.getState().setSheetOpen(true);
@@ -811,6 +813,140 @@ function addStayWalks(
   return { ...journey, dest, legs, totalMinutes: journey.totalMinutes + extra, walkFromGpsMin, walkToDestMin };
 }
 
+function isPlace(hit: { name?: string; keys?: string[]; lines?: { id: string }[] } | { lng: number; lat: number }) {
+  if (!("name" in hit) || !hit.name) return false;
+  return Boolean(hit.keys?.includes("place")) || (Array.isArray(hit.lines) && hit.lines.length === 0 && hit.keys?.includes("addr"));
+}
+
+function asPlace(row: { name: string; lng: number; lat: number; prefecture?: string }): StationHit {
+  return { name: row.name, lng: row.lng, lat: row.lat, prefecture: row.prefecture ?? "", lines: [], keys: ["place"] };
+}
+
+async function geocodePlaces(q: string, near: { lng: number; lat: number } | null): Promise<StationHit[]> {
+  const qs = new URLSearchParams({ q: q.trim().slice(0, 80) });
+  if (near) {
+    qs.set("lat", String(near.lat));
+    qs.set("lng", String(near.lng));
+  }
+  try {
+    const res = await fetch(`/api/geocode?${qs}`, { signal: AbortSignal.timeout(9000) });
+    const data = (await res.json()) as { places?: Array<{ name: string; lng: number; lat: number; prefecture?: string }> };
+    return (data.places ?? []).filter((p) => Number.isFinite(p.lng) && Number.isFinite(p.lat)).map((p) => asPlace(p));
+  } catch {
+    return [];
+  }
+}
+
+function railOf(hit: StationHit | { lng: number; lat: number }): StationHit | null {
+  if ("lines" in hit && hit.lines.length && !isPlace(hit)) return hit as StationHit;
+  return nearestRailStop(hit.lng, hit.lat);
+}
+
+function stayFromPlace(hit: StationHit): Stay {
+  return {
+    id: `addr:${hit.lng.toFixed(5)},${hit.lat.toFixed(5)}`,
+    name: hit.name,
+    nameZh: hit.name,
+    nameEn: hit.name,
+    address: hit.name,
+    addressZh: hit.name,
+    addressEn: hit.name,
+    regionJa: hit.prefecture || "",
+    regionZh: hit.prefecture || "",
+    regionEn: hit.prefecture || "",
+    kindJa: "住所",
+    kindZh: "地址",
+    kindEn: "Address",
+    lng: hit.lng,
+    lat: hit.lat,
+    url: "",
+    photos: [],
+  };
+}
+
+export async function applyPlaceTrip(
+  origin: StationHit | { lng: number; lat: number },
+  dest: StationHit,
+  opts?: { silent?: boolean; skipCamera?: boolean },
+) {
+  const destPlace = isPlace(dest);
+  const originPlace = isPlace(origin);
+  if (!destPlace && !originPlace) {
+    await applyTrip(origin, dest, opts);
+    return;
+  }
+  const s = useMapStore.getState();
+  const loc = "lng" in origin ? origin : dest;
+  const fromNear = stationsNearPlace(s.stationIndex, loc.lng, loc.lat, 1)[0];
+  const toNear = stationsNearPlace(s.stationIndex, dest.lng, dest.lat, 1)[0];
+  const railFrom = originPlace || !("name" in origin && origin.name)
+    ? (fromNear?.station as StationHit | undefined) ?? nearestRailStop(loc.lng, loc.lat)
+    : railOf(origin);
+  const railTo = destPlace ? (toNear?.station as StationHit | undefined) ?? nearestRailStop(dest.lng, dest.lat) : dest;
+  if (destPlace) {
+    s.selectStay(stayFromPlace(dest));
+    s.setStayLayer(true);
+    s.setStayWalk(true);
+  }
+  s.selectTrain(null);
+  s.setFollowTrainId(null);
+  if (railFrom && railTo && stationKey(railFrom) !== stationKey(railTo)) {
+    await applyTrip(railFrom, railTo, { ...opts, skipPins: true, skipCamera: true });
+  } else {
+    s.setJourneys([]);
+    if (!opts?.silent) {
+      s.setSearching(true);
+      s.setSheetOpen(true);
+    }
+  }
+  const originStop: RouteStop | null = railFrom
+    ? { name: railFrom.name, lng: railFrom.lng, lat: railFrom.lat, prefecture: railFrom.prefecture }
+    : null;
+  const destStop: RouteStop | null = railTo
+    ? { name: railTo.name, lng: railTo.lng, lat: railTo.lat, prefecture: railTo.prefecture }
+    : null;
+  const originPt: RouteStop =
+    "name" in origin && origin.name
+      ? { name: origin.name, lng: origin.lng, lat: origin.lat, prefecture: origin.prefecture ?? "" }
+      : { name: "", lng: loc.lng, lat: loc.lat, prefecture: "" };
+  const destPt: RouteStop = { name: dest.name, lng: dest.lng, lat: dest.lat, prefecture: dest.prefecture };
+  const fromKm = originStop ? haversine([originPt.lng, originPt.lat], [originStop.lng, originStop.lat]) : 0;
+  const toKm = destStop ? haversine([destStop.lng, destStop.lat], [destPt.lng, destPt.lat]) : 0;
+  const originWalk =
+    (originPlace || !originPt.name) && originStop && fromKm >= 0.05
+      ? { min: walkMinutes(fromKm), from: originPt, to: originStop }
+      : undefined;
+  const shopWalk =
+    destPlace && destStop && toKm >= 0.01 ? { min: walkMinutes(toKm), from: destStop, to: destPt } : undefined;
+  const st = useMapStore.getState();
+  const patched = st.journeys.length
+    ? st.journeys.map((j) => addStayWalks(j, originWalk, shopWalk))
+    : shopWalk || originWalk
+      ? [
+          addStayWalks(
+            {
+              origin: originStop ?? originPt,
+              dest: destPt,
+              legs: [],
+              totalMinutes: 0,
+              transfers: 0,
+              departHhmm: "",
+              arriveHhmm: "",
+              source: "local",
+            },
+            originWalk,
+            shopWalk,
+          ),
+        ]
+      : [];
+  if (patched.length) st.setJourneys(patched, Math.min(st.journeyIndex, patched.length - 1));
+  if ("name" in origin && origin.name) st.setOrigin(origin as StationHit);
+  st.setDest(dest);
+  st.selectStation(dest);
+  if (!opts?.skipCamera) st.requestFlyTo({ lng: dest.lng, lat: dest.lat, zoom: 14.8, bearing: 0, pitch: 0.55, center: true });
+  if (!opts?.silent) st.setSearching(false);
+}
+
 export async function applyStayTrip(stay: Stay) {
   const s = useMapStore.getState();
   const loc = s.userLocation ?? NODA;
@@ -967,6 +1103,7 @@ function hitFromEl(el: HTMLElement, rows: StationHit[]): StationHit | null {
       lat,
       prefecture: pf,
       lines: [],
+      keys: el.dataset.place === "1" ? ["place"] : undefined,
     }
   );
 }
@@ -981,11 +1118,13 @@ export function fillPickedStation(hit: StationHit, field?: "from" | "to") {
   s.selectStation(chosen);
   s.setPickField(null);
   const after = useMapStore.getState();
-  if (after.originStation && after.destStation) {
-    void applyTrip(after.originStation, after.destStation, { skipCamera: true });
+  const dest = after.destStation;
+  const origin = after.originStation ?? currentOrigin() ?? NODA;
+  if (dest && (after.originStation || isPlace(dest) || isPlace(origin))) {
+    void applyPlaceTrip(origin, dest, { skipCamera: false });
   } else {
     s.requestFlyTo({ lng: chosen.lng, lat: chosen.lat, zoom: 14.2, bearing: 0, pitch: 0.55, center: true });
-    void calibrateStation(chosen);
+    if (!isPlace(chosen)) void calibrateStation(chosen);
   }
   return true;
 }
@@ -1034,6 +1173,31 @@ function stationTextMatch(st: StationHit, text: string) {
   return false;
 }
 
+function exactStationFromQuery(
+  index: Map<string, StationHit>,
+  text: string,
+  known: StationHit | null,
+  near: { lng: number; lat: number } | null,
+): StationHit | null {
+  if (known && stationTextMatch(known, text) && !isPlace(known)) return known;
+  return resolveStationQuery(index, text, known, near).suggestions.find((h) => stationTextMatch(h, text) && !isPlace(h)) ?? null;
+}
+
+async function resolveSearchPoint(
+  index: Map<string, StationHit>,
+  text: string,
+  known: StationHit | null,
+  near: { lng: number; lat: number } | null,
+): Promise<StationHit | null> {
+  const q = text.trim();
+  if (!q) return known;
+  if (known && stationTextMatch(known, q)) return known;
+  const exact = exactStationFromQuery(index, q, known, near);
+  if (exact && stationTextMatch(exact, q)) return exact;
+  const geo = await geocodePlaces(q, near);
+  return geo[0] ?? null;
+}
+
 function resolvePicked(
   index: Map<string, StationHit>,
   text: string,
@@ -1058,6 +1222,7 @@ export function SearchPanel() {
   const [focus, setFocus] = useState<"from" | "to" | null>(null);
   const [fromText, setFromText] = useState("");
   const [toText, setToText] = useState("");
+  const [places, setPlaces] = useState<StationHit[]>([]);
 
   useEffect(() => {
     if (originStation?.name) setFromText(displayName(originStation.name, lang));
@@ -1078,9 +1243,45 @@ export function SearchPanel() {
   const resolved = showHits
     ? resolveStationQuery(index, q, null, useMapStore.getState().userLocation)
     : null;
-  const hits = resolved?.suggestions ?? [];
+  const stationHits = resolved?.suggestions ?? [];
+  const exactStationQ = Boolean(q.trim() && stationHits.some((h) => stationTextMatch(h, q)));
+  const hits = (() => {
+    const out: StationHit[] = [];
+    const seen = new Set<string>();
+    const add = (h: StationHit) => {
+      const k = `${isPlace(h) ? "p" : "s"}|${h.name}|${h.lng.toFixed(5)}|${h.lat.toFixed(5)}`;
+      if (seen.has(k)) return;
+      seen.add(k);
+      out.push(h);
+    };
+    if (!exactStationQ) {
+      for (const p of places) add(p);
+      for (const h of stationHits) add(h);
+    } else {
+      for (const h of stationHits) add(h);
+      for (const p of places) add(p);
+    }
+    return out;
+  })();
   const hitsRef = useRef(hits);
   hitsRef.current = hits;
+
+  useEffect(() => {
+    if (!showHits || q.trim().length < 1) {
+      setPlaces([]);
+      return;
+    }
+    let live = true;
+    const id = window.setTimeout(() => {
+      void geocodePlaces(q, useMapStore.getState().userLocation).then((rows) => {
+        if (live) setPlaces(rows);
+      });
+    }, 180);
+    return () => {
+      live = false;
+      window.clearTimeout(id);
+    };
+  }, [showHits, q]);
 
   const blurFields = () => {
     setFocus(null);
@@ -1116,14 +1317,27 @@ export function SearchPanel() {
   };
 
   const runSearch = () => {
-    const dest = resolvePicked(index, toText, destStation, null);
-    const originPick = resolvePicked(index, fromText, originStation, null);
-    const origin = originPick ?? currentOrigin();
-    if (!origin || !dest) return;
-    if (dest.name) setToText(displayName(dest.name, lang));
-    if ("name" in origin && typeof origin.name === "string") setFromText(displayName(origin.name, lang));
     blurFields();
-    void applyTrip(origin, dest);
+    void (async () => {
+      const store = useMapStore.getState();
+      store.setSearching(true);
+      try {
+        const near = store.userLocation;
+        const dest = toText.trim() ? await resolveSearchPoint(index, toText, destStation, near) : null;
+        if (!dest) {
+          store.setSearching(false);
+          return;
+        }
+        const origin = fromText.trim()
+          ? await resolveSearchPoint(index, fromText, originStation, near)
+          : currentOrigin() ?? store.userLocation ?? NODA;
+        if (dest.name) setToText(displayName(dest.name, lang));
+        if (origin && "name" in origin && typeof origin.name === "string") setFromText(displayName(origin.name, lang));
+        await applyPlaceTrip(origin, dest);
+      } catch {
+        useMapStore.getState().setSearching(false);
+      }
+    })();
   };
 
   const swap = () => {
@@ -1137,30 +1351,33 @@ export function SearchPanel() {
     useMapStore.getState().setDest(origin);
     const o = dest ?? resolveStation(index, nextFrom, null) ?? currentOrigin();
     const d = origin ?? resolveStation(index, nextTo, null);
-    if (o && d) void applyTrip(o, d);
+    if (o && d) void applyPlaceTrip(o, d);
   };
 
   const lockOn = (which: "from" | "to") => {
     const text = which === "from" ? fromText : toText;
     const known = which === "from" ? originStation : destStation;
-    const st = resolvePicked(index, text, known, useMapStore.getState().selectedStation);
-    if (!st) return;
-    if (which === "from") {
-      setFromText(displayName(st.name, lang));
-      useMapStore.getState().setOrigin(st);
-    } else {
-      setToText(displayName(st.name, lang));
-      useMapStore.getState().setDest(st);
-    }
-    const s = useMapStore.getState();
-    s.selectStay(null);
-    s.selectTrain(null);
-    s.setFollowTrainId(null);
-    s.selectStation(st);
-    s.requestFlyTo({ lng: st.lng, lat: st.lat, zoom: 14.2, bearing: 0, pitch: 0.55 });
+    void (async () => {
+      const st = await resolveSearchPoint(index, text, known, useMapStore.getState().userLocation);
+      if (!st) return;
+      if (which === "from") {
+        setFromText(displayName(st.name, lang));
+        useMapStore.getState().setOrigin(st);
+      } else {
+        setToText(displayName(st.name, lang));
+        useMapStore.getState().setDest(st);
+      }
+      const s = useMapStore.getState();
+      s.selectStay(null);
+      s.selectTrain(null);
+      s.setFollowTrainId(null);
+      s.selectStation(st);
+      s.requestFlyTo({ lng: st.lng, lat: st.lat, zoom: 14.2, bearing: 0, pitch: 0.55 });
+      if (!isPlace(st)) void calibrateStation(st);
+    })();
   };
 
-  const canSearch = Boolean(toText.trim()) && Boolean(fromText.trim() || originStation || locateStatus === "ok");
+  const canSearch = Boolean(toText.trim());
 
   return (
     <div className="flex flex-col gap-2.5">
@@ -1282,6 +1499,7 @@ export function SearchPanel() {
                 data-pf={hit.prefecture}
                 data-lng={String(hit.lng)}
                 data-lat={String(hit.lat)}
+                data-place={isPlace(hit) ? "1" : ""}
                 className="relative z-10 flex min-h-12 w-full shrink-0 items-center justify-between gap-2 rounded-[var(--radius-sm)] px-2 py-3 text-left hover:bg-fg/6"
                 onPointerDown={(e) => e.stopPropagation()}
                 onPointerUp={(e) => {
@@ -1298,7 +1516,9 @@ export function SearchPanel() {
                 <span className="min-w-0">
                   <span className="block truncate text-sm text-fg">{displayName(hit.name, lang)}</span>
                   <span className="block truncate text-xs text-fg-muted">
-                    {displayName(hit.prefecture, lang)} · {hit.lines.map((l) => displayName(l.name, lang)).slice(0, 2).join(" / ")}
+                    {isPlace(hit)
+                      ? `${displayName(hit.prefecture, lang) || t.placeKind} · ${t.placeKind}`
+                      : `${displayName(hit.prefecture, lang)} · ${hit.lines.map((l) => displayName(l.name, lang)).slice(0, 2).join(" / ")}`}
                   </span>
                 </span>
               </button>
@@ -1350,7 +1570,17 @@ function blendGps(pos: GeolocationPosition) {
   const dt = Math.max(0.2, (t - gpsHold.t) / 1000);
   const d = haversine([gpsHold.lng, gpsHold.lat], [lng, lat]) * 1000;
   const speed = d / dt;
-  if (speed > 130 && d > acc * 3 && !(reported > 8)) {
+  const stale = lastFixAt === 0 || Date.now() - lastFixAt > 3500 || gpsHold.acc > 80;
+  if (d > 600 && stale) {
+    gpsHold.lng = lng;
+    gpsHold.lat = lat;
+    gpsHold.acc = acc;
+    gpsHold.t = t;
+    gpsHold.on = true;
+    gpsHold.move = reported > 2.2 ? 10 : d > 40 ? 10 : 0;
+    return { lng, lat, acc };
+  }
+  if (speed > 130 && d > acc * 3 && !(reported > 8) && !stale) {
     gpsHold.t = t;
     return { lng: gpsHold.lng, lat: gpsHold.lat, acc: gpsHold.acc };
   }
@@ -1360,16 +1590,16 @@ function blendGps(pos: GeolocationPosition) {
     gpsHold.t = t;
     return { lng: gpsHold.lng, lat: gpsHold.lat, acc: gpsHold.acc };
   }
-  const dead = rolling ? 1.2 : Math.max(4, Math.min(acc, gpsHold.acc) * 0.35);
+  const dead = rolling ? 0.8 : Math.max(2.4, Math.min(acc, gpsHold.acc) * 0.22);
   if (d < dead) {
     gpsHold.acc = Math.min(gpsHold.acc, acc);
     gpsHold.t = t;
     return { lng: gpsHold.lng, lat: gpsHold.lat, acc: gpsHold.acc };
   }
-  const k = rolling ? (d > 50 ? 0.94 : 0.88) : acc <= 12 ? 0.55 : acc <= 22 ? 0.35 : 0.22;
+  const k = rolling ? (d > 40 ? 0.97 : 0.92) : acc <= 12 ? 0.72 : acc <= 22 ? 0.5 : 0.32;
   gpsHold.lng += (lng - gpsHold.lng) * k;
   gpsHold.lat += (lat - gpsHold.lat) * k;
-  gpsHold.acc = rolling ? acc : gpsHold.acc * 0.55 + acc * 0.45;
+  gpsHold.acc = rolling ? acc : gpsHold.acc * 0.5 + acc * 0.5;
   gpsHold.t = t;
   return { lng: gpsHold.lng, lat: gpsHold.lat, acc: gpsHold.acc };
 }
@@ -1402,10 +1632,11 @@ function startWatch() {
   if (watchId != null || typeof navigator === "undefined" || !navigator.geolocation) return;
   watchId = navigator.geolocation.watchPosition(
     (pos) => {
-      pushFix(pos);
+      const ok = pushFix(pos);
+      if (ok) flyWhenLocked();
     },
     () => {},
-    { enableHighAccuracy: true, timeout: 8000, maximumAge: 400 },
+    { enableHighAccuracy: true, timeout: 6000, maximumAge: 0 },
   );
 }
 
@@ -1430,18 +1661,79 @@ function armFineLocate() {
   if (fineTimer || typeof window === "undefined") return;
   fineTimer = window.setInterval(() => {
     if (document.visibilityState !== "visible") return;
-    if (useMapStore.getState().locateStatus !== "ok") return;
+    const st = useMapStore.getState().locateStatus;
     const moving = gpsHold.move > 0;
-    const wait = watchId != null ? (moving ? 8000 : streetZoom ? 16000 : 24000) : moving ? 1600 : streetZoom ? 8000 : 16000;
-    if (Date.now() - lastFixAt < wait) return;
+    const locked = st === "ok";
+    const wait = !locked ? 700 : watchId != null ? (moving ? 2500 : streetZoom ? 8000 : 12000) : moving ? 900 : streetZoom ? 4000 : 8000;
+    if (locked && Date.now() - lastFixAt < wait) return;
     navigator.geolocation.getCurrentPosition(
       (pos) => {
-        pushFix(pos);
+        const ok = pushFix(pos);
+        if (ok) flyWhenLocked();
       },
-      () => {},
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: moving ? 400 : 4000 },
+      () => {
+        if (useMapStore.getState().locateStatus === "denied") return;
+        if (useMapStore.getState().locateStatus !== "ok") {
+          useMapStore.getState().setUserLocation(useMapStore.getState().userLocation, "pending");
+        }
+      },
+      { enableHighAccuracy: true, timeout: locked ? 8000 : 5000, maximumAge: locked && !moving ? 1200 : 0 },
     );
-  }, 2000);
+  }, 800);
+}
+
+let locateFly = false;
+
+function flyWhenLocked() {
+  if (!locateFly) return;
+  const s = useMapStore.getState();
+  if (s.locateStatus !== "ok" || !s.userLocation) return;
+  s.requestFlyTo({ lng: s.userLocation.lng, lat: s.userLocation.lat, bearing: 0, pitch: 0.55 });
+  locateFly = false;
+}
+
+function pingGps() {
+  if (typeof navigator === "undefined" || !navigator.geolocation) return;
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      const ok = pushFix(pos);
+      if (ok) {
+        flyWhenLocked();
+        return;
+      }
+      if (!isInJapan(pos.coords.longitude, pos.coords.latitude)) {
+        useMapStore.getState().setUserLocation(useMapStore.getState().userLocation, "outside");
+        locateFly = false;
+        return;
+      }
+      window.setTimeout(pingGps, 400);
+    },
+    (err) => {
+      const s = useMapStore.getState();
+      if (err.code === 1) {
+        s.setUserLocation(s.userLocation, "denied");
+        locateFly = false;
+        return;
+      }
+      if (s.locateStatus !== "ok") s.setUserLocation(s.userLocation, "pending");
+      window.setTimeout(pingGps, 700);
+    },
+    { enableHighAccuracy: true, timeout: 6500, maximumAge: 0 },
+  );
+}
+
+export function locateUser(fly: boolean) {
+  startHeading();
+  if (fly) locateFly = true;
+  const s = useMapStore.getState();
+  if (s.locateStatus !== "ok") s.setUserLocation(s.userLocation, "pending");
+  if (!navigator.geolocation) {
+    s.setUserLocation(s.userLocation, "error");
+    locateFly = false;
+    return;
+  }
+  armFineLocate();
+  pingGps();
 }
 
 function startHeading() {
@@ -1486,46 +1778,3 @@ function startHeading() {
   } else bind();
 }
 
-export function locateUser(fly: boolean) {
-  startHeading();
-  const goHome = (lng: number, lat: number) => {
-    if (fly) {
-      useMapStore.getState().requestFlyTo({ lng, lat, bearing: 0, pitch: 0.55 });
-    }
-  };
-  const goNoda = (status: "denied" | "error" | "outside") => {
-    gpsHold.on = false;
-    useMapStore.getState().setUserLocation(NODA, status);
-    goHome(NODA.lng, NODA.lat);
-  };
-  if (useMapStore.getState().locateStatus !== "ok") {
-    useMapStore.getState().setUserLocation(useMapStore.getState().userLocation ?? NODA, "pending");
-  }
-  if (!navigator.geolocation) {
-    goNoda("error");
-    return;
-  }
-  const apply = (pos: GeolocationPosition) => {
-    if (!pushFix(pos) && !isInJapan(pos.coords.longitude, pos.coords.latitude)) {
-      useMapStore.getState().setUserLocation(NODA, "outside");
-    }
-  };
-  navigator.geolocation.getCurrentPosition(
-    (pos) => {
-      apply(pos);
-      const here = useMapStore.getState().userLocation;
-      if (here && isInJapan(here.lng, here.lat)) goHome(here.lng, here.lat);
-      else goHome(NODA.lng, NODA.lat);
-      if (!fly) {
-        navigator.geolocation.getCurrentPosition(apply, () => {}, { enableHighAccuracy: true, timeout: 14000, maximumAge: 2000 });
-      }
-      armFineLocate();
-    },
-    (err) => {
-      goNoda(err.code === 1 ? "denied" : "error");
-    },
-    fly
-      ? { enableHighAccuracy: true, timeout: 14000, maximumAge: 3000 }
-      : { enableHighAccuracy: false, timeout: 8000, maximumAge: 20000 },
-  );
-}

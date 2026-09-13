@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { detectLang, type Lang } from "@/lib/i18n";
-import { dateAtTokyoClock, nearestStationsFrom, NODA } from "@/lib/rail/geo";
+import { dateAtTokyoClock, nearestStationsFrom } from "@/lib/rail/geo";
 import type { Departure, Journey, LineRuntime, StationHit, Train } from "@/lib/rail/types";
 import type { Stay } from "@/data/stays";
 import type { KonbiniBrand, KonbiniStore } from "@/lib/konbini";
@@ -181,7 +181,7 @@ export const useMapStore = create<MapStore>((set, get) => ({
         : [],
     })),
   setLoadError: (loadError) => set({ loadError }),
-  userLocation: NODA,
+  userLocation: null,
   locateStatus: "idle",
   setUserLocation: (userLocation, locateStatus) =>
     set((s) => ({

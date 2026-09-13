@@ -1420,7 +1420,7 @@ function remainingJourneySegs(lines: LineRuntime[]) {
     return segs;
   }
 
-  const shopTrip = Boolean(journey.walkToDestMin);
+  const shopTrip = Boolean(journey.walkToDestMin || journey.walkFromGpsMin);
   for (let i = 0; i < journey.legs.length; i++) {
     const leg = journey.legs[i]!;
     if (leg.kind === "walk") {
@@ -1428,14 +1428,15 @@ function remainingJourneySegs(lines: LineRuntime[]) {
         shopTrip && Number.isFinite(leg.from.lng) ? leg.from : locateStation(leg.from.name, lines, index, leg.from);
       const to = shopTrip && Number.isFinite(leg.to.lng) ? leg.to : locateStation(leg.to.name, lines, index, leg.to);
       const shop = shopTrip && i === journey.legs.length - 1;
+      if (shop && useMapStore.getState().stayWalk) continue;
       const start = shop
         ? from
         : here && haversine([here.lng, here.lat], [to.lng, to.lat]) < haversine([from.lng, from.lat], [to.lng, to.lat]) + 0.02
           ? here
           : from;
       const hop = haversine([start.lng, start.lat], [to.lng, to.lat]);
-      if (!shop && hop > 1.8) continue;
-      if (hop < 0.05) continue;
+      if (!shop && hop > 1.8 && !shopTrip) continue;
+      if (hop < 0.01) continue;
       const pts: [number, number][] = [
         [start.lng, start.lat],
         [to.lng, to.lat],
@@ -4530,7 +4531,7 @@ export function CanvasMap() {
             }
           }
           const stayWalkTo = st.stayWalk ? st.selectedStay : null;
-          if (stayWalkTo && !st.journey?.walkToDestMin) {
+          if (stayWalkTo) {
             const near = stationsNearPlace(st.stationIndex, stayWalkTo.lng, stayWalkTo.lat, 1)[0];
             const [sx, sy] = project(stayWalkTo.lng, stayWalkTo.lat, camRef.current, w, h);
             if (near && Number.isFinite(sx) && Number.isFinite(sy)) {
@@ -5266,7 +5267,7 @@ export function CanvasMap() {
     store.selectStation(null);
     introDoneRef.current = true;
     const user = store.userLocation;
-    if (user) {
+    if (store.locateStatus === "ok" && user) {
       const farKm = store.nearestStations.length
         ? Math.max(...store.nearestStations.map((r) => r.km), 0.7)
         : 2;
@@ -5277,6 +5278,7 @@ export function CanvasMap() {
       setZoomUi(z);
       pullRoads(user.lng, user.lat, z);
       wakeRef.current();
+      locateUser(false);
       return;
     }
     locateUser(true);

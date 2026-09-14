@@ -105,7 +105,7 @@ function cover(lng: number, lat: number, z: number, rad: number) {
   for (let y = cy - rad; y <= cy + rad; y++) {
     for (let x = cx - rad; x <= cx + rad; x++) {
       requestPng(z, x, y);
-      if (z > 14) requestPng(z - 1, x >> 1, y >> 1);
+      if (z > 13) requestPng(z - 1, x >> 1, y >> 1);
     }
   }
 }
@@ -115,14 +115,24 @@ export function prefetchRoads(lng: number, lat: number) {
 }
 
 export function pullRoads(lng: number, lat: number, zoom: number, meters = RING_M) {
-  if (zoom < SHOW_ZOOM - 0.9) return;
+  if (zoom < SHOW_ZOOM - 1.2) return;
   const z = dataZ(Math.max(SHOW_ZOOM, zoom));
   const rad = tileSpan(lat, z, meters);
   const id = `${z}/${lngToTile(lng, z)}/${latToTile(lat, z)}|${rad}`;
-  if (id === lastPull) return;
+  const ready = (() => {
+    const cx = lngToTile(lng, z);
+    const cy = latToTile(lat, z);
+    for (let y = cy - rad; y <= cy + rad; y++) {
+      for (let x = cx - rad; x <= cx + rad; x++) {
+        if (!pngAt(z, x, y)) return false;
+      }
+    }
+    return true;
+  })();
+  if (id === lastPull && ready) return;
   lastPull = id;
   cover(lng, lat, z, rad);
-  if (z > 14) cover(lng, lat, z - 1, Math.max(1, rad - 1));
+  if (z > 13) cover(lng, lat, z - 1, Math.max(1, rad - 1));
 }
 
 export function ringScreen(
@@ -139,13 +149,13 @@ export function ringScreen(
 
 function tileSpan(lat: number, z: number, meters: number) {
   const tileM = (40_075_016.68 * Math.cos((lat * Math.PI) / 180)) / 2 ** z;
-  return Math.max(1, Math.min(3, Math.ceil(Math.max(RING_M, meters) / Math.max(80, tileM))));
+  return Math.max(1, Math.min(4, Math.ceil(Math.max(RING_M, meters) / Math.max(80, tileM))));
 }
 
 function pngAt(z: number, x: number, y: number): { img: HTMLImageElement; z: number; x: number; y: number } | null {
   const hit = pngs.get(`${z}/${x}/${y}`);
   if (hit instanceof HTMLImageElement) return { img: hit, z, x, y };
-  if (z > 14) return pngAt(z - 1, x >> 1, y >> 1);
+  if (z > 12) return pngAt(z - 1, x >> 1, y >> 1);
   return null;
 }
 
@@ -180,7 +190,9 @@ function drawPng(
       const sw = project(west, south, alt);
       const se = project(east, south, alt);
       const pts = [nw, ne, sw, se];
-      const finite = pts.every((p) => Number.isFinite(p[0]) && Number.isFinite(p[1]) && Math.abs(p[0]) < 8000 && Math.abs(p[1]) < 8000);
+      const finite = pts.every((p) => Number.isFinite(p[0]) && Number.isFinite(p[1]));
+      const vis = pts.some((p) => Number.isFinite(p[0]) && Number.isFinite(p[1]) && p[0] > -2500 && p[0] < 4500 && p[1] > -2500 && p[1] < 4500);
+      if (!vis) continue;
       const img = got.img;
       const iw = img.naturalWidth || 256;
       const ih = img.naturalHeight || 256;
@@ -240,7 +252,7 @@ export function drawRoads(
   g.lineWidth = 2.2;
   g.stroke();
 
-  if (cam.zoom >= SHOW_ZOOM) {
+  if (cam.zoom >= SHOW_ZOOM - 0.8) {
     g.beginPath();
     g.arc(ring.cx, ring.cy, Math.max(8, ring.rad - 1), 0, Math.PI * 2);
     g.clip();

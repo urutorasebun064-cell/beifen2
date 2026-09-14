@@ -3891,7 +3891,7 @@ export function CanvasMap() {
 
         const followId = useMapStore.getState().followTrainId;
         const busyCam = Boolean(drag.current) || Boolean(camLerpRef.current);
-        const simDue = ts - lastSim > (followId && !busyCam ? 90 : busyCam ? 280 : 150);
+        const simDue = ts - lastSim > (followId && !busyCam ? 28 : busyCam ? 280 : 150);
         if (simDue) {
           lastSim = ts;
           const station = useMapStore.getState().selectedStation;
@@ -4500,8 +4500,8 @@ export function CanvasMap() {
               let d = hdgT - walk.hdg;
               while (d > 180) d -= 360;
               while (d < -180) d += 360;
-              walk.hdg += d * (Math.abs(d) > 50 ? 1 : Math.abs(d) > 12 ? 0.55 : 0.38);
-              if (Math.abs(d) > 0.9) dirty = true;
+              walk.hdg += d * (Math.abs(d) > 2.5 ? 1 : 0.92);
+              if (Math.abs(d) > 0.08) dirty = true;
               const rad = (walk.hdg * Math.PI) / 180;
               const step = 0.00038;
               const clat = Math.cos((walk.lat * Math.PI) / 180);

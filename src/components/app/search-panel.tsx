@@ -1554,10 +1554,11 @@ let streetZoom = false;
 let lastFixAt = 0;
 let gpsHdgAt = 0;
 let compassAt = 0;
+let sensorAt = 0;
 let headingMovedAt = 0;
 
 export function headingFresh() {
-  return Date.now() - headingMovedAt < 800;
+  return Date.now() - headingMovedAt < 1600;
 }
 
 function headingDelta(a: number, b: number) {
@@ -1642,9 +1643,9 @@ function pushFix(pos: GeolocationPosition) {
   const spd = pos.coords.speed;
   const course = pos.coords.heading;
   if (
-    Date.now() - compassAt > 1800 &&
+    Date.now() - compassAt > 4000 &&
     Number.isFinite(spd) &&
-    (spd as number) > 2.8 &&
+    (spd as number) > 4 &&
     Number.isFinite(course) &&
     (course as number) >= 0
   ) {
@@ -1762,16 +1763,6 @@ export function locateUser(fly: boolean) {
   pingGps();
 }
 
-function screenTurn() {
-  const o =
-    typeof screen !== "undefined" && screen.orientation && Number.isFinite(screen.orientation.angle)
-      ? screen.orientation.angle
-      : typeof window !== "undefined" && typeof window.orientation === "number"
-        ? window.orientation
-        : 0;
-  return ((Number(o) % 360) + 360) % 360;
-}
-
 function compassFromEuler(alpha: number, beta: number, gamma: number) {
   const r = Math.PI / 180;
   const x = beta * r;
@@ -1790,33 +1781,71 @@ function compassFromEuler(alpha: number, beta: number, gamma: number) {
   return h;
 }
 
+function headingFromQuat(q: number[]) {
+  const x = q[0] ?? 0;
+  const y = q[1] ?? 0;
+  const z = q[2] ?? 0;
+  const w = q[3] ?? 1;
+  const tx = 2 * (y * 0 - z * 1);
+  const ty = 2 * (z * 0 - x * 0);
+  const tz = 2 * (x * 1 - y * 0);
+  const east = 0 + w * tx + (y * tz - z * ty);
+  const north = 1 + w * ty + (z * tx - x * tz);
+  let h = Math.atan2(east, north) * (180 / Math.PI);
+  if (h < 0) h += 360;
+  return h;
+}
+
+function publishHeading(deg: number, flat: boolean) {
+  let d = deg % 360;
+  if (d < 0) d += 360;
+  compassAt = Date.now();
+  const prev = useMapStore.getState().headingDeg;
+  if (prev == null || Math.abs(headingDelta(prev, d)) >= 0.12) headingMovedAt = Date.now();
+  useMapStore.getState().setHeading(d, flat);
+}
+
 function startHeading() {
   if (typeof window === "undefined") return;
+  const Sensor = (window as unknown as { AbsoluteOrientationSensor?: new (opts: { frequency: number; referenceFrame: string }) => {
+    quaternion?: number[] | null;
+    start: () => void;
+    stop: () => void;
+    addEventListener: (name: string, fn: () => void) => void;
+  } }).AbsoluteOrientationSensor;
+  if (Sensor && !headingWatch) {
+    try {
+      const sensor = new Sensor({ frequency: 60, referenceFrame: "device" });
+      sensor.addEventListener("reading", () => {
+        const q = sensor.quaternion;
+        if (!q || q.length < 4) return;
+        sensorAt = Date.now();
+        publishHeading(headingFromQuat(q), useMapStore.getState().headingFlat);
+      });
+      sensor.start();
+      headingWatch = true;
+    } catch {
+      /* fall through to deviceorientation */
+    }
+  }
   const apply = (e: DeviceOrientationEvent) => {
+    if (Date.now() - sensorAt < 220) return;
     const webkit = (e as DeviceOrientationEvent & { webkitCompassHeading?: number }).webkitCompassHeading;
     const abs = Boolean(e.absolute) || e.type === "deviceorientationabsolute";
-    const beta = e.beta ?? 90;
-    const gamma = e.gamma ?? 0;
+    const beta = typeof e.beta === "number" ? e.beta : 90;
+    const gamma = typeof e.gamma === "number" ? e.gamma : 0;
     const flat = Math.abs(beta) < 75 && Math.abs(gamma) < 55;
     let deg: number | null = null;
     if (typeof webkit === "number" && Number.isFinite(webkit)) {
       deg = webkit;
-    } else if (flat && typeof e.alpha === "number" && Number.isFinite(e.alpha) && (abs || Date.now() - compassAt > 400)) {
-      deg = (compassFromEuler(e.alpha, beta, gamma) + screenTurn()) % 360;
-    } else if (abs && typeof e.alpha === "number" && Number.isFinite(e.alpha)) {
-      deg = (360 - e.alpha) % 360;
-    } else if (Date.now() - compassAt > 1200 && typeof e.alpha === "number" && Number.isFinite(e.alpha)) {
-      deg = (360 - e.alpha) % 360;
+    } else if (typeof e.alpha === "number" && Number.isFinite(e.alpha) && (abs || Date.now() - compassAt > 80)) {
+      deg = compassFromEuler(e.alpha, beta, gamma);
     }
     if (deg == null) {
       useMapStore.getState().setHeading(useMapStore.getState().headingDeg, flat);
       return;
     }
-    if (deg < 0) deg += 360;
-    compassAt = Date.now();
-    const prev = useMapStore.getState().headingDeg;
-    if (prev == null || Math.abs(headingDelta(prev, deg)) >= 0.4) headingMovedAt = Date.now();
-    useMapStore.getState().setHeading(deg, flat);
+    publishHeading(deg, flat);
   };
   const DOE = window.DeviceOrientationEvent as unknown as { requestPermission?: () => Promise<string> };
   const bind = () => {
@@ -1833,6 +1862,8 @@ function startHeading() {
     void DOE.requestPermission()
       .then(() => bind())
       .catch(() => bind());
-  } else if (!headingWatch) bind();
+  } else if (!headingApply) {
+    bind();
+  }
 }
 

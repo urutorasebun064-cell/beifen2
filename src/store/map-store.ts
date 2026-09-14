@@ -201,7 +201,7 @@ export const useMapStore = create<MapStore>((set, get) => ({
         let d = headingDeg - s.headingDeg;
         while (d > 180) d -= 360;
         while (d < -180) d += 360;
-        if (Math.abs(d) < 0.4) return s;
+        if (Math.abs(d) < 0.15) return s;
       }
       return { headingDeg, headingFlat };
     }),

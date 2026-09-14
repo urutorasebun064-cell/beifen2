@@ -43,7 +43,10 @@ function nameForms(name: string, pf: string) {
   add(yahooName(n, pf));
   add(yahooName(ke, pf));
   add(yahooName(ge, pf));
-  return out.slice(0, 3);
+  add(n);
+  add(ke);
+  add(ge);
+  return out.slice(0, 6);
 }
 
 function parseHhmm(s: string | undefined) {
@@ -111,7 +114,8 @@ function lastStopName(j: Journey) {
 function journeyHitsDest(j: Journey, dest: RouteStop) {
   const last = lastStopName(j);
   const n = stemName(dest.name);
-  if (n && stemName(last) !== n) return false;
+  const ln = stemName(last);
+  if (n && ln !== n && !ln.startsWith(n) && !n.startsWith(ln)) return false;
   const lp = prefToken(last);
   const dp = shortPf(fullPref(dest.prefecture ?? "") || dest.prefecture || "");
   if (lp && dp && lp !== dp) return false;
@@ -119,8 +123,28 @@ function journeyHitsDest(j: Journey, dest: RouteStop) {
 }
 
 function keepDest(rows: Journey[], dest: RouteStop) {
+  if (!rows.length) return rows;
   const hit = rows.filter((j) => journeyHitsDest(j, dest));
-  return hit.length ? hit : [];
+  if (hit.length) return hit;
+  const n = stemName(dest.name);
+  const dp = shortPf(fullPref(dest.prefecture ?? "") || dest.prefecture || "");
+  const named = n
+    ? rows.filter((j) => {
+        const last = lastStopName(j);
+        const ln = stemName(last);
+        if (ln !== n && !ln.startsWith(n) && !n.startsWith(ln)) return false;
+        const lp = prefToken(last);
+        if (lp && dp && lp !== dp) return false;
+        return true;
+      })
+    : [];
+  if (named.length) return named;
+  const leftover = rows.filter((j) => {
+    const lp = prefToken(lastStopName(j));
+    if (lp && dp && lp !== dp) return false;
+    return true;
+  });
+  return leftover.length ? leftover : rows;
 }
 
 async function yahooPage(

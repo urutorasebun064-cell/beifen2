@@ -1762,22 +1762,52 @@ export function locateUser(fly: boolean) {
   pingGps();
 }
 
+function screenTurn() {
+  const o =
+    typeof screen !== "undefined" && screen.orientation && Number.isFinite(screen.orientation.angle)
+      ? screen.orientation.angle
+      : typeof window !== "undefined" && typeof window.orientation === "number"
+        ? window.orientation
+        : 0;
+  return ((Number(o) % 360) + 360) % 360;
+}
+
+function compassFromEuler(alpha: number, beta: number, gamma: number) {
+  const r = Math.PI / 180;
+  const x = beta * r;
+  const y = gamma * r;
+  const z = alpha * r;
+  const cX = Math.cos(x);
+  const cY = Math.cos(y);
+  const cZ = Math.cos(z);
+  const sX = Math.sin(x);
+  const sY = Math.sin(y);
+  const sZ = Math.sin(z);
+  const vx = -cZ * sY - sZ * sX * cY;
+  const vy = -sZ * sY + cZ * sX * cY;
+  let h = Math.atan2(vx, vy) * (180 / Math.PI);
+  if (h < 0) h += 360;
+  return h;
+}
+
 function startHeading() {
   if (typeof window === "undefined") return;
   const apply = (e: DeviceOrientationEvent) => {
     const webkit = (e as DeviceOrientationEvent & { webkitCompassHeading?: number }).webkitCompassHeading;
     const abs = Boolean(e.absolute) || e.type === "deviceorientationabsolute";
+    const beta = e.beta ?? 90;
+    const gamma = e.gamma ?? 0;
+    const flat = Math.abs(beta) < 75 && Math.abs(gamma) < 55;
     let deg: number | null = null;
     if (typeof webkit === "number" && Number.isFinite(webkit)) {
       deg = webkit;
+    } else if (flat && typeof e.alpha === "number" && Number.isFinite(e.alpha) && (abs || Date.now() - compassAt > 400)) {
+      deg = (compassFromEuler(e.alpha, beta, gamma) + screenTurn()) % 360;
     } else if (abs && typeof e.alpha === "number" && Number.isFinite(e.alpha)) {
       deg = (360 - e.alpha) % 360;
     } else if (Date.now() - compassAt > 1200 && typeof e.alpha === "number" && Number.isFinite(e.alpha)) {
       deg = (360 - e.alpha) % 360;
     }
-    const beta = e.beta ?? 90;
-    const gamma = e.gamma ?? 0;
-    const flat = Math.abs(beta) < 75 && Math.abs(gamma) < 55;
     if (deg == null) {
       useMapStore.getState().setHeading(useMapStore.getState().headingDeg, flat);
       return;

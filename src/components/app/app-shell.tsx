@@ -312,6 +312,7 @@ export function AppShell() {
                 const s = useMapStore.getState();
                 if (s.sheetOpen && s.journey) {
                   lockJourneyTrain(s.journey, { keepSheet: false, camera: false });
+                  useMapStore.getState().setSheetOpen(false);
                   return;
                 }
                 s.setSheetOpen(!s.sheetOpen);

@@ -122,8 +122,8 @@ export async function pinLivePosition(train: Train, lines: LineRuntime[], odptKe
       return fallback;
     }
     const line = lines.find((l) => l.id === train.lineId) ?? lines.find((l) => l.id === hit.lineId);
-    const delayMin = Math.max(train.delayMin, hit.delayMin);
-    const delaySec = Math.max(train.delaySec ?? 0, hit.delaySec ?? 0, delayMin * 60);
+    let delayMin = Math.max(train.delayMin, hit.delayMin);
+    let delaySec = Math.max(train.delaySec ?? 0, hit.delaySec ?? 0, delayMin * 60);
     let gps = hit.gps === true;
     let lng = hit.lng;
     let lat = hit.lat;
@@ -149,6 +149,13 @@ export async function pinLivePosition(train: Train, lines: LineRuntime[], odptKe
           const simKm = nearestOnPath(line, train.lng, train.lat).km;
           const lagKm = train.dir === 1 ? snap.km - simKm : simKm - snap.km;
           if (lagKm > 0.7) liveLate = true;
+          const kmPerMin = train.kind === "shinkansen" ? 3.2 : 0.7;
+          const lagMin = lagKm / kmPerMin;
+          if (lagMin >= 3) {
+            liveLate = true;
+            delayMin = Math.max(delayMin, Math.round(lagMin));
+            delaySec = Math.max(delaySec, Math.round(lagMin * 60));
+          }
         }
       }
     }

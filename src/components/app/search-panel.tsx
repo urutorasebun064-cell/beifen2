@@ -3,7 +3,7 @@ import { ArrowUpDown, MapPin, Search, X } from "lucide-react";
 import { copies, displayName } from "@/lib/i18n";
 import { toJa } from "@/lib/han";
 import { tokyoParts, toHhmm, arriveHhmmOf, NODA, isInJapan, haversine, stationsNearPlace, walkMinutes } from "@/lib/rail/geo";
-import { liveDelayFor, stampJourneyDelay } from "@/lib/rail/delay";
+import { liveDelayFor, stampJourneyDelay, withTrainDelay, delaySeconds } from "@/lib/rail/delay";
 import { railsMatch } from "@/lib/rail/yahoo";
 import { planJourney, stationKey, ensureConnections } from "@/lib/rail/route";
 import { departuresAt } from "@/lib/rail/schedule";
@@ -652,6 +652,7 @@ export async function calibrateTrain(train: Train, opts?: { silent?: boolean }) 
       s.liveError,
     );
     if (!silent && next.kind !== "shinkansen") void calibrateLineMates(next);
+    applySelectedDelayToTrip(next);
   } catch {
     /* keep current */
   } finally {
@@ -661,6 +662,27 @@ export async function calibrateTrain(train: Train, opts?: { silent?: boolean }) 
 
 export function startTransitRefresh() {
   return () => {};
+}
+
+export function applySelectedDelayToTrip(train: Train) {
+  if (delaySeconds(train) <= 0 && !train.delayAlert) return;
+  const s = useMapStore.getState();
+  const j = s.journey;
+  if (!j) return;
+  const onTrip = j.legs.some(
+    (leg) =>
+      leg.kind === "ride" &&
+      ((leg.lineId && train.lineId === leg.lineId) || (leg.lineName && railsMatch(train.lineName, leg.lineName))),
+  );
+  if (!onTrip) return;
+  const stamped = withTrainDelay(j, train);
+  if (stamped === j) return;
+  const next = s.journeys.slice();
+  const idx = next.findIndex(
+    (row) => row.departHhmm === j.departHhmm && row.arriveHhmm === j.arriveHhmm && row.transfers === j.transfers,
+  );
+  if (idx >= 0) next[idx] = stamped;
+  s.setJourneys(next.length ? next : [stamped], idx >= 0 ? idx : s.journeyIndex);
 }
 
 function corridorLineIds(journeys: Journey[], lines: LineRuntime[], index: Map<string, StationHit>) {

@@ -465,49 +465,11 @@ export async function fetchYahooDiaInfo(): Promise<YahooDiaDelay[]> {
   }
 }
 
-export function stampYahooDia(journey: Journey, dia: YahooDiaDelay[]): Journey {
-  if (!dia.length) return journey;
-  let sec = journey.delaySec && journey.delaySec > 0 ? journey.delaySec : 0;
-  if (journey.delayMin && journey.delayMin > 0) sec = Math.max(sec, journey.delayMin * 60);
-  let alert = Boolean(journey.delayAlert);
-  for (const leg of journey.legs) {
-    if (leg.kind !== "ride" || !leg.lineName) continue;
-    for (const d of dia) {
-      if (!railsMatch(leg.lineName, d.name)) continue;
-      alert = alert || d.alert;
-      sec = Math.max(sec, d.delaySec);
-    }
-  }
-  if (!alert && sec <= 0) return journey;
-  const delayMin = sec > 0 ? Math.max(journey.delayMin ?? 0, Math.max(1, Math.round(sec / 60))) : journey.delayMin;
-  const delaySec = sec > 0 ? Math.max(journey.delaySec ?? 0, sec) : journey.delaySec;
-  if (delayMin === journey.delayMin && delaySec === journey.delaySec && alert === Boolean(journey.delayAlert)) return journey;
-  return { ...journey, delayMin, delaySec, delayAlert: alert || sec > 0 };
+export function stampYahooDia(journey: Journey, _dia: YahooDiaDelay[]): Journey {
+  return journey;
 }
 
-export function stampTrainsDia(trains: Train[], dia: YahooDiaDelay[]): Train[] {
-  if (!dia.length || !trains.length) return trains;
-  let changed = false;
-  const next = trains.map((t) => {
-    if (t.kind === "flight" || t.kind === "bus") return t;
-    let sec = t.delaySec && t.delaySec > 0 ? t.delaySec : 0;
-    if (t.delayMin > 0) sec = Math.max(sec, t.delayMin * 60);
-    let hit = false;
-    let alert = Boolean(t.delayAlert);
-    for (const d of dia) {
-      if (!railsMatch(t.lineName, d.name) && !railsMatch(t.lineId, d.name)) continue;
-      hit = true;
-      alert = alert || d.alert;
-      sec = Math.max(sec, d.delaySec);
-    }
-    if (!hit) return t;
-    const delayMin = sec > 0 ? Math.max(t.delayMin, Math.max(1, Math.round(sec / 60))) : t.delayMin;
-    const delaySec = sec > 0 ? Math.max(t.delaySec ?? 0, sec) : t.delaySec;
-    const delayAlert = alert || sec > 0;
-    if (delayMin === t.delayMin && delaySec === t.delaySec && delayAlert === Boolean(t.delayAlert)) return t;
-    changed = true;
-    return { ...t, delayMin, delaySec, delayAlert };
-  });
-  return changed ? next : trains;
+export function stampTrainsDia(trains: Train[], _dia: YahooDiaDelay[]): Train[] {
+  return trains;
 }
 

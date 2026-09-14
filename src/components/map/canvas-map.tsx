@@ -23,7 +23,7 @@ import {
 } from "@/lib/weather";
 import type { Journey, LineRuntime, RouteLeg, StationHit, Train } from "@/lib/rail/types";
 import { Button } from "@/components/ui/button";
-import { applyMateTrip, calibrateTrain, calibrateStation, fillPickedStation, headingFresh, locateUser, noteStreetZoom } from "@/components/app/search-panel";
+import { applyMateTrip, applySelectedDelayToTrip, calibrateTrain, calibrateStation, fillPickedStation, headingFresh, locateUser, noteStreetZoom } from "@/components/app/search-panel";
 import { chainRailPath, findLineForLeg, locateStation, sliceRailPath } from "@/lib/rail/graph";
 import { placeTrainOnLeg, stopIndexByName } from "@/lib/rail/timetable-snap";
 import { arrivalCompare, journeyGuide, rideHeadline } from "@/components/app/route-panel";
@@ -4748,6 +4748,7 @@ export function CanvasMap() {
             void calibrateTrain(ride);
             void pinLivePosition(ride, lineRef.current, useMapStore.getState().odptKey).then((next) => {
               if (useMapStore.getState().selectedTrain?.id === ride.id) useMapStore.getState().selectTrain(next);
+              applySelectedDelayToTrip(next);
             });
           }
         }
@@ -4922,6 +4923,7 @@ export function CanvasMap() {
             void calibrateTrain(bestTrain);
             void pinLivePosition(bestTrain, lineRef.current, useMapStore.getState().odptKey).then((next) => {
               if (useMapStore.getState().selectedTrain?.id === bestTrain.id) useMapStore.getState().selectTrain(next);
+              applySelectedDelayToTrip(next);
             });
           }
         }

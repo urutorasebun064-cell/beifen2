@@ -38,16 +38,22 @@ export function FollowCard() {
   const sub = train?.kind === "flight" ? flightRoute(train, lang) : "";
   const arrLine = train && train.kind !== "flight" ? arrivalCompare(train, simNow(), t, lang) : "";
   const nextName = train ? displayName(train.nextStop || train.dest || train.prevStop, lang) : "";
-  const lateLook = /晚|遅|late/i.test(arrLine);
+  const lateLook = /晚|遅|late|見合わせ|停运|suspend/i.test(arrLine);
   const officialLate = Boolean(train && (delaySeconds(train) > 0 || train.delayAlert));
+  const gpsOn = Boolean(train && train.kind !== "flight" && (train.posStatus === "live" || train.gps));
+  const gpsRunning = Boolean(gpsOn && !train?.liveLate && delaySeconds(train) <= 0 && !train?.delayAlert);
   const statusText =
     !train || train.kind === "flight"
       ? ""
-      : train.posStatus === "live" || train.gps
-        ? train.liveLate && !officialLate
+      : gpsRunning
+        ? t.posLiveOk
+        : gpsOn && (train.liveLate || officialLate)
           ? t.posLiveLate
-          : t.posLive
-        : "";
+          : gpsOn
+            ? t.posLive
+            : "";
+  const haltText =
+    !gpsRunning && (train?.suspended || journey?.suspended) ? t.suspend : !gpsOn && officialLate ? `${t.delay}${realtimeSec > 0 ? ` ${realtimeSec}${t.sec}` : ""}` : "";
   return (
     <section className="rounded-[var(--radius-xl)] bg-surface/96 p-3 shadow-[var(--shadow-border)] backdrop-blur-md">
       <div className="flex items-start justify-between gap-2">
@@ -78,6 +84,7 @@ export function FollowCard() {
                 </p>
               ) : null}
               {statusText ? <p className="mt-1 text-[11px] leading-snug text-fg-muted">{statusText}</p> : null}
+              {haltText ? <p className="mt-1 text-sm font-medium text-[#e4453a]">{haltText}</p> : null}
             </div>
           </div>
         </div>

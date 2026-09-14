@@ -208,7 +208,7 @@ function delayFromDiaText(status: string, message: string, situation: string) {
   return parseDelayText(`${status} ${message} ${situation}`);
 }
 
-function delayFromFeat(feat: YahooFeature): { delayMin: number; delaySec: number; delayAlert: boolean } {
+function delayFromFeat(feat: YahooFeature): { delayMin: number; delaySec: number; delayAlert: boolean; suspended: boolean } {
   const s = feat.summaryInfo ?? {};
   const parts: string[] = [];
   for (const k of ["delayMinute", "delayTime", "delay", "status"] as const) {
@@ -223,19 +223,24 @@ function delayFromFeat(feat: YahooFeature): { delayMin: number; delaySec: number
       if (rec[k]) parts.push(String(rec[k]));
     }
   }
-  const parsed = parseDelayText(parts.join(" "));
+  const blob = parts.join(" ");
+  if (/運転見合わせ/.test(blob)) return { delayMin: 0, delaySec: 0, delayAlert: false, suspended: true };
+  const parsed = parseDelayText(blob);
   let delaySec = parsed?.delaySec ?? 0;
-  const delayAlert = Boolean(parsed?.alert);
   if (delaySec <= 0) {
     const n = Number(String(s.delayMinute ?? s.delayTime ?? s.delay ?? "").replace(/[^\d.]/g, ""));
     if (Number.isFinite(n) && n > 0) delaySec = n > 180 ? n : n * 60;
   }
-  if (!delayAlert && delaySec <= 0) return { delayMin: 0, delaySec: 0, delayAlert: false };
-  return {
-    delayMin: delaySec > 0 ? Math.max(1, Math.round(delaySec / 60)) : 0,
-    delaySec: delaySec > 0 ? Math.round(delaySec) : 0,
-    delayAlert: delayAlert || delaySec > 0,
-  };
+  if (delaySec > 0) {
+    return {
+      delayMin: Math.max(1, Math.round(delaySec / 60)),
+      delaySec: Math.round(delaySec),
+      delayAlert: true,
+      suspended: false,
+    };
+  }
+  if (parsed?.alert) return { delayMin: 0, delaySec: 0, delayAlert: true, suspended: false };
+  return { delayMin: 0, delaySec: 0, delayAlert: false, suspended: false };
 }
 
 function clockSpan(dep?: string, arr?: string): number {
@@ -345,6 +350,7 @@ function featureToJourney(feat: YahooFeature, origin: RouteStop, dest: RouteStop
     delayMin: delay.delayMin || undefined,
     delaySec: delay.delaySec || undefined,
     delayAlert: delay.delayAlert || undefined,
+    suspended: delay.suspended || undefined,
   };
 }
 

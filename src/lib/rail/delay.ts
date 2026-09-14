@@ -59,35 +59,8 @@ export function journeyShowsDelay(journey: Journey | null | undefined) {
   return journeyDelaySeconds(journey) > 0 || Boolean(journey.delayAlert);
 }
 
-export function stampJourneyDelay(journey: Journey, live: Train[]): Journey {
-  let sec = journeyDelaySeconds(journey);
-  let alert = Boolean(journey.delayAlert);
-  for (const t of live) {
-    if (t.kind === "flight" || t.kind === "bus") continue;
-    if (!t.gps && !t.liveLate && delaySeconds(t) <= 0 && !t.delayAlert) continue;
-    if (!t.gps && !t.liveLate) continue;
-    const onTrip = journey.legs.some((leg) => {
-      if (leg.kind !== "ride") return false;
-      const lineOk =
-        Boolean(leg.lineId && t.lineId === leg.lineId) ||
-        Boolean(leg.lineName && railsMatch(t.lineName, leg.lineName));
-      if (!lineOk) return false;
-      return (
-        t.prevStop === leg.from.name ||
-        t.nextStop === leg.from.name ||
-        t.nextStop === leg.to.name ||
-        t.dest === (leg.toward || leg.to.name)
-      );
-    });
-    if (!onTrip) continue;
-    sec = Math.max(sec, delaySeconds(t));
-    alert = alert || Boolean(t.delayAlert || t.liveLate);
-  }
-  const delayMin = sec > 0 ? Math.max(journey.delayMin ?? 0, Math.max(1, Math.round(sec / 60))) : journey.delayMin;
-  const delaySec = sec > 0 ? Math.max(journey.delaySec ?? 0, sec) : journey.delaySec;
-  const delayAlert = alert || sec > 0;
-  if (delayMin === journey.delayMin && delaySec === journey.delaySec && delayAlert === Boolean(journey.delayAlert)) return journey;
-  return { ...journey, delayMin, delaySec, delayAlert };
+export function stampJourneyDelay(journey: Journey, _live: Train[]): Journey {
+  return journey;
 }
 
 export function withTrainDelay(journey: Journey, train: Train): Journey {

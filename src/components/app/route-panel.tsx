@@ -1,5 +1,5 @@
 import { copies, displayName, type Copy, type Lang } from "@/lib/i18n";
-import { journeyDelaySeconds, journeyShowsDelay, stampJourneyDelay } from "@/lib/rail/delay";
+import { journeyDelaySeconds, journeyShowsDelay, stampJourneyDelay, delaySeconds } from "@/lib/rail/delay";
 import { haversine, tokyoParts, arriveHhmmOf } from "@/lib/rail/geo";
 import { minutesUntilDepart } from "@/lib/rail/simulate";
 import { ensureConnections } from "@/lib/rail/route";
@@ -240,22 +240,26 @@ function trainForLeg(leg: RouteLeg, train: Train | null, live: Train[]) {
   );
 }
 
-function statusExtra(leg: RouteLeg, train: Train | null, t: Copy, lang: Lang, tripSec = 0, delayAlert = false) {
+function statusExtra(leg: RouteLeg, train: Train | null, t: Copy, lang: Lang, tripSec = 0, delayAlert = false, suspended = false) {
   const dep = validHhmm(leg.departHhmm) ? leg.departHhmm : "";
   const st = displayName(leg.from.name, lang);
   const head = [dep, `${st}${t.departAt}`].filter(Boolean).join(" ");
   const bits: string[] = [];
   const left = stopsAway(leg, train);
-  const delayed = tripSec > 0 || delayAlert;
+  const gpsOk = Boolean(train && (train.gps || train.posStatus === "live") && !train.liveLate && (train.delaySec ?? 0) <= 0 && train.delayMin <= 0);
+  const delayed = !gpsOk && (tripSec > 0 || delayAlert);
+  const stopped = !gpsOk && suspended;
   const delayBit = tripSec > 0 ? `${t.delay} ${tripSec}${t.sec}` : t.delay;
-  if (train && left != null) {
+  if (gpsOk) bits.push(t.posLiveOk);
+  else if (stopped) bits.push(t.suspend);
+  else if (train && left != null) {
     if (delayed) bits.push(delayBit);
     else bits.push(t.runningNow);
     bits.push(t.stopsLeft.replace("{n}", String(left)));
   } else if (delayed) {
     bits.push(delayBit);
   } else bits.push(t.onTime);
-  return { text: head ? `${head}（${bits.join("・")}）` : bits.join("・"), alert: delayed };
+  return { text: head ? `${head}（${bits.join("・")}）` : bits.join("・"), alert: delayed || stopped };
 }
 
 function walkBit(min: number, t: Copy) {
@@ -309,9 +313,11 @@ export function journeyGuide(journey: Journey, train: Train | null, t: Copy) {
   const steps: GuideStep[] = [];
   const tripSec = journeyDelaySeconds(stamped);
   const delayAlert = Boolean(stamped.delayAlert);
+  const gpsRunning = Boolean(train && (train.gps || train.posStatus === "live") && !train.liveLate && delaySeconds(train) <= 0);
+  const suspended = Boolean(stamped.suspended) && !gpsRunning;
   rides.forEach((leg, i) => {
     const liveTrain = trainForLeg(leg, i === idx ? train : null, live);
-    const status = statusExtra(leg, liveTrain, t, lang, tripSec, delayAlert);
+    const status = statusExtra(leg, liveTrain, t, lang, tripSec, delayAlert && !gpsRunning, suspended);
     const title = rideTitle(leg, t, lang);
     if (i === 0) steps.push({ kind: "head", text: title, extra: status.text, extraAlert: status.alert });
     else {
@@ -366,6 +372,7 @@ export function lockJourneyTrain(journey: Journey, opts?: { camera?: boolean; ke
   if (!ride) return;
   const waiting = ride.kind === "ride" && rideWaiting(ride, simNow(), stamped.delayMin ?? 0);
   let pick = lockRide(ride, { keepSheet: opts?.keepSheet ?? waiting });
+  if (pick && stamped.suspended) pick = { ...pick, suspended: true };
   if (pick && waiting) {
     pick = { ...pick, lng: ride.from.lng, lat: ride.from.lat };
     useMapStore.getState().selectTrain(pick);
@@ -498,7 +505,9 @@ export function RoutePanel({ journey }: { journey: Journey }) {
                     {transferLine(j, t)}
                     {j.walkToDestMin ? ` · ${t.walkAfter}${t.about}${Math.round(j.walkToDestMin)}${t.min}` : ""}
                   </span>
-                  {journeyShowsDelay(shown) ? (
+                  {shown.suspended ? (
+                    <span className="ml-1 text-xs font-medium text-[#e4453a]">{t.suspend}</span>
+                  ) : journeyShowsDelay(shown) ? (
                     <span className="ml-1 text-xs font-medium text-[#e4453a]">
                       {t.delay}
                       {journeyDelaySeconds(shown) > 0 ? `${journeyDelaySeconds(shown)}${t.sec}` : ""}

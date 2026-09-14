@@ -665,7 +665,7 @@ export function startTransitRefresh() {
 }
 
 export function applySelectedDelayToTrip(train: Train) {
-  if (delaySeconds(train) <= 0 && !train.delayAlert) return;
+  if (delaySeconds(train) < 180) return;
   const s = useMapStore.getState();
   const j = s.journey;
   if (!j) return;

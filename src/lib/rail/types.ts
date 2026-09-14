@@ -62,6 +62,7 @@ export type Train = {
   alightHhmm?: string;
   posStatus?: "live" | "dia" | "timetable" | "crowd";
   liveLate?: boolean;
+  suspended?: boolean;
 };
 
 export type StationHit = {
@@ -135,6 +136,8 @@ export type Journey = {
   delaySec?: number;
   /** Line-level 運行情報 delay with no numeric seconds (Yahoo 列車遅延). */
   delayAlert?: boolean;
+  /** Yahoo 運転見合わせ on this trip. */
+  suspended?: boolean;
   fast?: boolean;
   easy?: boolean;
   cheap?: boolean;

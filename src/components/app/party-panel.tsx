@@ -244,7 +244,7 @@ async function bindPush(room: string, token: string, vapid?: string) {
   try {
     if (Notification.permission === "default") await Notification.requestPermission();
     if (Notification.permission !== "granted") return false;
-    await navigator.serviceWorker.register("/sw.js?v=29", { scope: "/", updateViaCache: "none" });
+    await navigator.serviceWorker.register("/sw.js?v=30", { scope: "/", updateViaCache: "none" });
     const reg = await navigator.serviceWorker.ready;
     await reg.update().catch(() => undefined);
     const key = url64(vapid);
@@ -449,7 +449,10 @@ async function partyNotify(preview = "•") {
   const s = useMapStore.getState();
   const viewing = !s.partyCollapsed && s.partyMenuOpen && document.visibilityState === "visible";
   if (viewing) return;
-  if (document.visibilityState === "visible") return;
+  if (document.visibilityState === "visible") {
+    s.setPartyToast(preview);
+    return;
+  }
   try {
     if (!("Notification" in window) || Notification.permission !== "granted") return;
     const reg = await navigator.serviceWorker.ready;
@@ -532,8 +535,37 @@ class PartyCatch extends Component<{ children: ReactNode }, { bad: boolean }> {
 export function PartySafe() {
   return (
     <PartyCatch>
+      <PartyToast />
       <PartyWindow />
     </PartyCatch>
+  );
+}
+
+function PartyToast() {
+  const lang = useMapStore((s) => s.lang);
+  const t = copies[lang];
+  const toast = useMapStore((s) => s.partyToast);
+  useEffect(() => {
+    if (!toast) return;
+    const id = window.setTimeout(() => useMapStore.getState().setPartyToast(null), 4500);
+    return () => window.clearTimeout(id);
+  }, [toast]);
+  if (!toast) return null;
+  return (
+    <button
+      type="button"
+      className="pointer-events-auto fixed inset-x-0 top-[5.6rem] z-50 mx-auto w-[min(92vw,22rem)] rounded-[var(--radius-md)] bg-surface/96 px-3 py-2.5 text-left shadow-[var(--shadow-border)] backdrop-blur-md"
+      onClick={() => {
+        const s = useMapStore.getState();
+        s.setPartyToast(null);
+        s.setPartyMenuOpen(true);
+        s.setPartyCollapsed(false);
+        clearPartyBadge();
+      }}
+    >
+      <p className="text-xs font-medium text-accent">{t.partyPing}</p>
+      <p className="mt-0.5 truncate text-sm text-fg">{toast}</p>
+    </button>
   );
 }
 
@@ -613,6 +645,10 @@ export function PartyWindow() {
         }
         markUnread();
         pingChat();
+        if (document.visibilityState === "visible") {
+          const t = copies[useMapStore.getState().lang];
+          useMapStore.getState().setPartyToast(t.partyPing);
+        }
       }
     };
     navigator.serviceWorker?.addEventListener("message", onMsg);

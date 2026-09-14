@@ -184,9 +184,11 @@ async function pingPush(room: Room, exceptId: string) {
     return;
   }
   const last = room.messages[room.messages.length - 1];
-  const preview = last ? `${last.nick}: ${(last.body || "•").slice(0, 40)}` : "•";
-  const payload = JSON.stringify({ title: "J", body: preview, tag: "jb-party" });
+  const preview = last ? `${last.nick}: ${(last.body || "•").slice(0, 40)}` : "有新消息";
+  const payload = JSON.stringify({ title: "J", body: preview || "有新消息", tag: "jb-party" });
   const roomKey = keyOf(room.name);
+  const live = new Set(room.members.flatMap((m) => [m.id, m.token].filter(Boolean)));
+  const left = new Set(room.leftIds || []);
   const bag = new Map<string, { uid: string; endpoint: string; p256dh: string; auth: string }>();
   for (const m of room.members) {
     if (!m.push?.endpoint || m.id === exceptId) continue;
@@ -194,11 +196,13 @@ async function pingPush(room: Room, exceptId: string) {
   }
   for (const p of await listPushes(roomKey)) {
     if (p.uid === exceptId || !p.endpoint) continue;
+    if (left.has(p.uid) || !live.has(p.uid)) continue;
     if (!bag.has(p.endpoint)) bag.set(p.endpoint, p);
   }
   for (const p of partyPush.values()) {
     if (p.uid === exceptId || !p.endpoint) continue;
     if (p.room !== roomKey) continue;
+    if (left.has(p.uid) || !live.has(p.uid)) continue;
     if (!bag.has(p.endpoint)) bag.set(p.endpoint, p);
   }
   const jobs = [...bag.values()].map((p) =>
@@ -214,7 +218,7 @@ async function pingPush(room: Room, exceptId: string) {
       }),
   );
   if (!jobs.length) return;
-  await Promise.race([Promise.allSettled(jobs), new Promise((r) => setTimeout(r, 2500))]);
+  await Promise.race([Promise.allSettled(jobs), new Promise((r) => setTimeout(r, 8000))]);
 }
 
 function loadGoneFile() {

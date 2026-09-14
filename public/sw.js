@@ -1,5 +1,5 @@
 /* J PWA — never hijack navigations or scripts. Old interceptors caused a black screen. */
-const SW_VER = "j-v29";
+const SW_VER = "j-v30";
 const TILES = "jb-tiles-v1";
 const STATIC = "jb-static-v1";
 
@@ -74,10 +74,14 @@ self.addEventListener("fetch", (event) => {
 self.addEventListener("push", (event) => {
   event.waitUntil(
     (async () => {
-      let body = "•";
+      let title = "J";
+      let body = "有新消息";
       try {
         const data = event.data ? event.data.json() : null;
-        if (data && data.body) body = String(data.body).slice(0, 80);
+        if (data) {
+          if (data.title) title = String(data.title).slice(0, 40);
+          if (data.body) body = String(data.body).slice(0, 80);
+        }
       } catch {
         try {
           const raw = event.data ? event.data.text() : "";
@@ -87,27 +91,33 @@ self.addEventListener("push", (event) => {
         }
       }
       const list = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
-      let visible = false;
       list.forEach((c) => {
-        c.postMessage({ type: "party-alert" });
-        if (c.visibilityState === "visible") visible = true;
+        try {
+          c.postMessage({ type: "party-alert" });
+        } catch {
+          /* */
+        }
       });
       try {
         if (self.navigator?.setAppBadge) await self.navigator.setAppBadge(1);
       } catch {
         /* */
       }
-      if (visible) return;
-      await self.registration.showNotification("J", {
+      await self.registration.showNotification(title, {
         body,
-        tag: "jb-party-" + Date.now(),
+        tag: "jb-party",
         icon: "/icon-192.png",
         badge: "/icon-192.png",
         silent: false,
         renotify: true,
-        vibrate: [40, 80, 40],
+        vibrate: [80, 40, 80],
         data: { type: "party-alert" },
       });
+      const looking = list.some((c) => c.visibilityState === "visible" && c.focused);
+      if (looking) {
+        const ns = await self.registration.getNotifications({ tag: "jb-party" });
+        ns.forEach((n) => n.close());
+      }
     })(),
   );
 });

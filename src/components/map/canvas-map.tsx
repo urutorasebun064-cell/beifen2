@@ -3379,8 +3379,9 @@ export function CanvasMap() {
     const wrap = wrapRef.current;
     const canvas = canvasRef.current;
     if (!wrap || !canvas) return;
-    const ctx = canvas.getContext("2d", { alpha: false });
+    const ctx = canvas.getContext("2d", { alpha: false, desynchronized: true });
     if (!ctx) return;
+    const ios = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
 
     let raf = 0;
     let running = false;
@@ -3407,7 +3408,7 @@ export function CanvasMap() {
     const applyTransform = (g: CanvasRenderingContext2D, dpr: number) => {
       g.setTransform(dpr, 0, 0, dpr, 0, 0);
       g.imageSmoothingEnabled = true;
-      g.imageSmoothingQuality = "high";
+      g.imageSmoothingQuality = ios ? "medium" : "high";
     };
 
     const resize = () => {
@@ -3415,8 +3416,8 @@ export function CanvasMap() {
       const cssW = Math.max(1, Math.floor(rect.width || window.innerWidth || 1));
       const cssH = Math.max(1, Math.floor(rect.height || window.innerHeight || 1));
       const area = Math.max(1, cssW * cssH);
-      const want = Math.min(2.25, window.devicePixelRatio || 1);
-      const maxArea = 3_200_000;
+      const want = Math.min(ios ? 1.5 : 2.25, window.devicePixelRatio || 1);
+      const maxArea = ios ? 1_800_000 : 3_200_000;
       const dpr = area * want * want > maxArea ? Math.max(1, Math.sqrt(maxArea / area)) : want;
       sizeRef.current = { w: cssW, h: cssH, dpr };
       try {

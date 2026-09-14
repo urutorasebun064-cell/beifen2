@@ -32,7 +32,7 @@ export const Route = createRootRoute({
       <head>
         <script
           dangerouslySetInnerHTML={{
-            __html: `(function(){try{if(navigator.serviceWorker){navigator.serviceWorker.register("/sw.js?v=30",{scope:"/"}).catch(function(){});}}catch(e){}function ping(){try{if(window.parent&&window.parent!==window){window.parent.postMessage({channel:"grok-preview-bridge",version:1,type:"ready"},"*");}}catch(e){}}ping();[0,50,200,500,1000,2000,4000,8000].forEach(function(ms){setTimeout(ping,ms);});})();`,
+            __html: `(function(){try{if(navigator.serviceWorker){navigator.serviceWorker.register("/sw.js?v=30",{scope:"/"}).catch(function(){});}}catch(e){}function ping(){try{if(window.parent&&window.parent!==window){window.parent.postMessage({channel:"grok-preview-bridge",version:1,type:"ready"},"*");}}catch(e){}}ping();[0,50,200,500,1000,2000,4000,8000].forEach(function(ms){setTimeout(ping,ms);});function lockUi(){try{var html=document.documentElement;html.style.fontSize="16px";var p=document.createElement("div");p.style.cssText="position:absolute;left:0;top:0;width:16px;height:16px;font-size:16px;line-height:16px;padding:0;margin:0;border:0;visibility:hidden;pointer-events:none";p.textContent="M";html.appendChild(p);var z=Math.max(p.getBoundingClientRect().width||16,p.getBoundingClientRect().height||16)/16;p.remove();if(z>1.08)html.style.fontSize=(16/Math.min(z,2.8))+"px";}catch(e){}}lockUi();window.addEventListener("resize",lockUi);if(window.visualViewport)window.visualViewport.addEventListener("resize",lockUi);})();`,
           }}
         />
         <HeadContent />

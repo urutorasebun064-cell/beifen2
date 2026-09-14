@@ -53,7 +53,14 @@ export function FollowCard() {
             ? t.posLive
             : "";
   const haltText =
-    !gpsRunning && (train?.suspended || journey?.suspended) ? t.suspend : !gpsOn && officialLate ? `${t.delay}${realtimeSec > 0 ? ` ${realtimeSec}${t.sec}` : ""}` : "";
+    gpsRunning
+      ? t.posLiveOk
+      : train?.suspended || journey?.suspended
+        ? t.suspend
+        : officialLate || tripSec > 0
+          ? `${t.delay}${realtimeSec > 0 ? ` ${realtimeSec}${t.sec}` : tripSec > 0 ? ` ${tripSec}${t.sec}` : ""}`
+          : "";
+  const haltAlert = Boolean(haltText && haltText !== t.posLiveOk);
   return (
     <section className="rounded-[var(--radius-xl)] bg-surface/96 p-3 shadow-[var(--shadow-border)] backdrop-blur-md">
       <div className="flex items-start justify-between gap-2">
@@ -83,8 +90,10 @@ export function FollowCard() {
                   {t.sec}
                 </p>
               ) : null}
-              {statusText ? <p className="mt-1 text-[11px] leading-snug text-fg-muted">{statusText}</p> : null}
-              {haltText ? <p className="mt-1 text-sm font-medium text-[#e4453a]">{haltText}</p> : null}
+              {statusText && statusText !== haltText ? <p className="mt-1 text-[11px] leading-snug text-fg-muted">{statusText}</p> : null}
+              {haltText ? (
+                <p className={`mt-1 text-sm font-medium ${haltAlert ? "text-[#e4453a]" : "text-fg"}`}>{haltText}</p>
+              ) : null}
             </div>
           </div>
         </div>

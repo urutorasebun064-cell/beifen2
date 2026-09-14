@@ -327,6 +327,23 @@ export function journeyGuide(journey: Journey, train: Train | null, t: Copy) {
     const times = timeRow(leg, t, lang);
     if (times) steps.push({ kind: "time", text: times });
   });
+  const flag = gpsRunning
+    ? t.posLiveOk
+    : suspended
+      ? t.suspend
+      : tripSec > 0
+        ? `${t.delay} ${tripSec}${t.sec}`
+        : delayAlert
+          ? t.delay
+          : "";
+  if (flag) {
+    const i = steps.findIndex((s) => s.kind === "head");
+    steps.splice(i >= 0 ? i + 1 : 0, 0, {
+      kind: "alight",
+      text: flag,
+      extraAlert: !gpsRunning && (suspended || tripSec > 0 || delayAlert),
+    });
+  }
   const alights = steps.map((s) => (s.extra ? `${s.text}  ${s.extra}` : s.text));
   return { head, next, alights, steps };
 }
@@ -358,13 +375,19 @@ export function transferLine(journey: Journey, t: Copy) {
 export function lockJourneyTrain(journey: Journey, opts?: { camera?: boolean; keepSheet?: boolean }) {
   const store = useMapStore.getState();
   const stamped = stampJourneyDelay(journey, store.liveTrains);
-  if (stamped.delaySec || stamped.delayMin || stamped.delayAlert) {
+  if (stamped.delaySec || stamped.delayMin || stamped.delayAlert || stamped.suspended) {
     const idx = store.journeys.findIndex(
       (j) => j.departHhmm === journey.departHhmm && j.arriveHhmm === journey.arriveHhmm && j.transfers === journey.transfers,
     );
     if (idx >= 0) {
       const next = store.journeys.slice();
-      next[idx] = { ...next[idx]!, delayMin: stamped.delayMin, delaySec: stamped.delaySec, delayAlert: stamped.delayAlert };
+      next[idx] = {
+        ...next[idx]!,
+        delayMin: stamped.delayMin,
+        delaySec: stamped.delaySec,
+        delayAlert: stamped.delayAlert,
+        suspended: stamped.suspended,
+      };
       store.setJourneys(next, idx);
     }
   }

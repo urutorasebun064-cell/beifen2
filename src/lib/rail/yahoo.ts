@@ -358,6 +358,7 @@ export type YahooDiaDelay = {
   name: string;
   delaySec: number;
   alert: boolean;
+  suspended?: boolean;
 };
 
 function railKey(name: string) {
@@ -423,16 +424,18 @@ export function parseYahooDia(html: string): YahooDiaDelay[] {
     if (!name) continue;
     let delaySec = 0;
     let alert = false;
+    let suspended = false;
     for (const info of p.diainfo ?? []) {
       const blob = [info.status, info.message, info.situation, info.statusSup1, info.statusSup2]
         .filter(Boolean)
         .join(" ");
+      if (/運転見合わせ/.test(String(info.status ?? "")) || /運転見合わせ/.test(blob)) suspended = true;
       const hit = delayFromDiaText(info.status ?? "", blob, "");
       if (!hit) continue;
       alert = true;
       delaySec = Math.max(delaySec, hit.delaySec);
     }
-    if (alert) out.push({ name, delaySec, alert });
+    if (suspended || alert) out.push({ name, delaySec, alert, suspended });
   }
   return out;
 }
@@ -460,7 +463,13 @@ export async function fetchYahooDiaInfo(): Promise<YahooDiaDelay[]> {
     for (const row of lists.flat()) {
       const prev = merged.get(row.name);
       if (!prev) merged.set(row.name, row);
-      else merged.set(row.name, { name: row.name, delaySec: Math.max(prev.delaySec, row.delaySec), alert: prev.alert || row.alert });
+      else
+        merged.set(row.name, {
+          name: row.name,
+          delaySec: Math.max(prev.delaySec, row.delaySec),
+          alert: prev.alert || row.alert,
+          suspended: Boolean(prev.suspended || row.suspended),
+        });
     }
     diaCache = { at: now, rows: [...merged.values()] };
     return diaCache.rows;
@@ -471,8 +480,32 @@ export async function fetchYahooDiaInfo(): Promise<YahooDiaDelay[]> {
   }
 }
 
-export function stampYahooDia(journey: Journey, _dia: YahooDiaDelay[]): Journey {
-  return journey;
+export function stampYahooDia(journey: Journey, dia: YahooDiaDelay[]): Journey {
+  if (!dia.length) return journey;
+  let suspended = Boolean(journey.suspended);
+  let sec = journey.delaySec && journey.delaySec > 0 ? journey.delaySec : 0;
+  if (journey.delayMin && journey.delayMin > 0) sec = Math.max(sec, journey.delayMin * 60);
+  let alert = Boolean(journey.delayAlert);
+  for (const leg of journey.legs) {
+    if (leg.kind !== "ride" || !leg.lineName) continue;
+    for (const d of dia) {
+      if (!railsMatch(leg.lineName, d.name)) continue;
+      if (d.suspended) suspended = true;
+      else if (d.alert) {
+        alert = true;
+        sec = Math.max(sec, d.delaySec);
+      }
+    }
+  }
+  if (suspended) {
+    if (journey.suspended && !journey.delayAlert && !journey.delayMin && !journey.delaySec) return journey;
+    return { ...journey, suspended: true, delayAlert: undefined, delayMin: undefined, delaySec: undefined };
+  }
+  if (!alert && sec <= 0) return journey;
+  const delayMin = sec > 0 ? Math.max(journey.delayMin ?? 0, Math.max(1, Math.round(sec / 60))) : journey.delayMin;
+  const delaySec = sec > 0 ? Math.max(journey.delaySec ?? 0, sec) : journey.delaySec;
+  if (delayMin === journey.delayMin && delaySec === journey.delaySec && alert === Boolean(journey.delayAlert)) return journey;
+  return { ...journey, delayMin, delaySec, delayAlert: alert || sec > 0 };
 }
 
 export function stampTrainsDia(trains: Train[], _dia: YahooDiaDelay[]): Train[] {

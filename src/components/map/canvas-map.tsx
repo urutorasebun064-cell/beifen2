@@ -3112,7 +3112,15 @@ function trainCardParts(t: Train, loc: Lang, txt: Copy, journey: Journey | null,
         text: s.text,
         extra: s.extra,
         extraAlert: s.extraAlert,
-        tone: (s.kind === "head" ? "head" : s.kind === "xfer" ? "xfer" : s.kind === "time" ? "time" : "alight") as CardTone,
+        tone: (s.extraAlert
+          ? "delay"
+          : s.kind === "head"
+            ? "head"
+            : s.kind === "xfer"
+              ? "xfer"
+              : s.kind === "time"
+                ? "time"
+                : "alight") as CardTone,
       }))
     : t.kind === "flight"
       ? ([
@@ -3178,7 +3186,9 @@ function drawTrainCard(
   const isFly = t.kind === "flight";
   const extraFont = "500 11.5px ui-sans-serif, sans-serif";
   const fontOf = (tone: string, _text = "") =>
-    tone === "head" || tone === "xfer"
+    tone === "delay"
+      ? "700 13px ui-sans-serif, sans-serif"
+      : tone === "head" || tone === "xfer"
       ? isFly
         ? "700 14px ui-sans-serif, sans-serif"
         : "700 12px ui-sans-serif, sans-serif"

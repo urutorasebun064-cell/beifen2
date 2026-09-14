@@ -360,7 +360,9 @@ export async function applyTrip(origin: StationHit | { lng: number; lat: number 
       const nowMin = clock.hour * 60 + clock.minute;
       const notPassed = (j: Journey) => departDue(j.departHhmm, nowMin) + Math.max(0, j.delayMin ?? 0) >= 0;
       let yahoo = await pullYahoo("1", clock.hour, clock.minute);
-      if (!yahoo.length) yahoo = await pullYahoo("1", clock.hour, clock.minute, true);
+      if (!yahoo.length && !("prefecture" in dest && dest.prefecture) && !("prefecture" in origin && origin.prefecture)) {
+        yahoo = await pullYahoo("1", clock.hour, clock.minute, true);
+      }
       const firstWait = yahoo[0] ? departDue(yahoo[0]!.departHhmm, nowMin) + Math.max(0, yahoo[0]!.delayMin ?? 0) : 99;
       if (yahoo.length && firstWait > 0) {
         const prev = (nowMin + 1439) % 1440;

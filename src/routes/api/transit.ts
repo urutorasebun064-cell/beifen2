@@ -10,9 +10,20 @@ function ymdTokyo(at = new Date()) {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit", day: "2-digit" }).format(at);
 }
 
-function yahooName(name: string, pf: string) {
-  const n = name.replace(/駅$/u, "").trim();
+function fullPref(pf: string) {
   const p = pf.trim();
+  if (!p) return "";
+  if (/[都道府県]$/u.test(p)) return p;
+  if (p === "東京") return "東京都";
+  if (p === "大阪") return "大阪府";
+  if (p === "京都") return "京都府";
+  if (p === "北海道") return "北海道";
+  return `${p}県`;
+}
+
+function yahooName(name: string, pf: string) {
+  const n = stemName(name);
+  const p = fullPref(pf);
   return p ? `${n}(${p})` : n;
 }
 
@@ -21,7 +32,7 @@ function shortPf(pf: string) {
 }
 
 function nameForms(name: string, pf: string) {
-  const n = name.replace(/駅$/u, "").trim();
+  const n = stemName(name);
   const ke = n.replace(/ヶ/g, "ケ");
   const ge = n.replace(/ケ/g, "ヶ");
   const out: string[] = [];
@@ -30,13 +41,9 @@ function nameForms(name: string, pf: string) {
     if (v && !out.includes(v)) out.push(v);
   };
   add(yahooName(n, pf));
-  add(yahooName(n, shortPf(pf)));
-  add(n);
   add(yahooName(ke, pf));
-  add(ke);
   add(yahooName(ge, pf));
-  add(ge);
-  return out.slice(0, 4);
+  return out.slice(0, 3);
 }
 
 function parseHhmm(s: string | undefined) {
@@ -60,6 +67,61 @@ function jid(j: Journey) {
 }
 
 type St = { name?: string; code?: string; label?: string; value?: string };
+
+function stemName(name: string) {
+  return name.replace(/駅$/u, "").replace(/[（(][^）)]{1,12}[）)]$/u, "").trim();
+}
+
+function prefToken(name: string) {
+  const m = String(name || "").match(/[（(]([^）)]{1,12})[）)]$/u);
+  return m ? m[1]!.replace(/[都道府県]$/u, "").trim() : "";
+}
+
+function codeOf(hit: St | undefined) {
+  if (!hit) return "";
+  if (hit.code) return `,,${hit.code}`;
+  if (hit.value && /,,\d/.test(hit.value)) return hit.value;
+  return "";
+}
+
+function pickCode(list: St[], pf: string, name: string) {
+  if (!list.length) return "";
+  const n = stemName(name);
+  const p = shortPf(fullPref(pf) || pf);
+  const scored = list.map((x) => {
+    const blob = `${x.name ?? ""}${x.label ?? ""}${x.value ?? ""}`;
+    const xn = stemName(x.name ?? "");
+    const xp = prefToken(x.name ?? "") || prefToken(x.label ?? "");
+    let s = 40;
+    if (xn === n && p && (xp === p || blob.includes(fullPref(pf)) || blob.includes(p))) s = 0;
+    else if (xn === n && !p) s = 1;
+    else if (xn === n) s = 2;
+    return { x, s };
+  });
+  scored.sort((a, b) => a.s - b.s);
+  const best = scored[0];
+  if (best && best.s <= 2) return codeOf(best.x);
+  return "";
+}
+
+function lastStopName(j: Journey) {
+  return j.legs[j.legs.length - 1]?.to?.name ?? j.dest?.name ?? "";
+}
+
+function journeyHitsDest(j: Journey, dest: RouteStop) {
+  const last = lastStopName(j);
+  const n = stemName(dest.name);
+  if (n && stemName(last) !== n) return false;
+  const lp = prefToken(last);
+  const dp = shortPf(fullPref(dest.prefecture ?? "") || dest.prefecture || "");
+  if (lp && dp && lp !== dp) return false;
+  return true;
+}
+
+function keepDest(rows: Journey[], dest: RouteStop) {
+  const hit = rows.filter((j) => journeyHitsDest(j, dest));
+  return hit.length ? hit : [];
+}
 
 async function yahooPage(
   from: string,
@@ -121,42 +183,6 @@ function stationLists(html: string): { fromList: St[]; toList: St[] } {
   }
 }
 
-function stemName(name: string) {
-  return name.replace(/駅$/u, "").replace(/[（(][^）)]{1,12}[）)]$/u, "").trim();
-}
-
-function coordPin(lat: number, lng: number, name: string) {
-  if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) < 20 || Math.abs(lng) < 120) return "";
-  return `${lat.toFixed(6)},${lng.toFixed(6)},${stemName(name)}`;
-}
-
-function codeOf(hit: St | undefined) {
-  if (!hit) return "";
-  if (hit.code) return `,,${hit.code}`;
-  if (hit.value && /(,,\d)|(\d+\.\d+\s*,\s*\d+\.\d+)/.test(hit.value)) return hit.value;
-  return "";
-}
-
-function pickCode(list: St[], pf: string, name: string, lat = 0, lng = 0) {
-  if (!list.length) return coordPin(lat, lng, name);
-  const n = stemName(name);
-  const p = shortPf(pf);
-  const scored = list.map((x) => {
-    const blob = `${x.name ?? ""}${x.label ?? ""}${x.value ?? ""}`;
-    const xn = stemName(x.name ?? "");
-    let s = 40;
-    if (xn === n && ((p && blob.includes(p)) || (pf && blob.includes(pf)))) s = 0;
-    else if (xn === n) s = 1;
-    else if (n && xn.includes(n) && ((p && blob.includes(p)) || (pf && blob.includes(pf)))) s = 2;
-    else if (n && xn.includes(n)) s = 3;
-    return { x, s };
-  });
-  scored.sort((a, b) => a.s - b.s);
-  const best = scored[0];
-  if (best && best.s <= 3) return codeOf(best.x);
-  return coordPin(lat, lng, name);
-}
-
 export const Route = createFileRoute("/api/transit")({
   server: {
     handlers: {
@@ -212,29 +238,28 @@ export const Route = createFileRoute("/api/transit")({
             pairs.push({ from: f, to: t, extra });
           };
           addPair(fromQ, toQ);
-          addPair(froms[1] ?? fromQ, tos[1] ?? toQ);
-          addPair(froms[2] ?? from.replace(/駅$/u, ""), tos[2] ?? to.replace(/駅$/u, ""));
+          for (const f of froms) addPair(f, toQ);
+          for (const t of tos) addPair(fromQ, t);
           for (const pair of pairs) {
             usedFrom = pair.from;
             usedTo = pair.to;
             const page = await yahooPage(usedFrom, usedTo, y ?? "", mo ?? "", d ?? "", hh, mm, type, origin, dest, pair.extra);
-            first = page.journeys;
-            const fc = pickCode(page.fromList, opf, from, olat, olng);
-            const tc = pickCode(page.toList, dpf, to, dlat, dlng);
-            const listed = page.fromList.length > 1 || page.toList.length > 1;
-            if ((listed || !first.length) && (fc || tc)) {
-              const coded = await yahooPage(usedFrom, usedTo, y ?? "", mo ?? "", d ?? "", hh, mm, type, origin, dest, {
-                flatlon: fc || pair.extra?.flatlon,
-                tlatlon: tc || pair.extra?.tlatlon,
-              });
-              if (coded.journeys.length) {
-                first = coded.journeys;
-                usedExtra = { flatlon: fc || pair.extra?.flatlon, tlatlon: tc || pair.extra?.tlatlon };
-                break;
+            const fc = pickCode(page.fromList, opf, from);
+            const tc = pickCode(page.toList, dpf, to);
+            const extra = { flatlon: fc || pair.extra?.flatlon, tlatlon: tc || pair.extra?.tlatlon };
+            let rows = keepDest(page.journeys, dest);
+            if ((fc || tc) && (page.fromList.length > 1 || page.toList.length > 1 || !rows.length)) {
+              const coded = await yahooPage(usedFrom, usedTo, y ?? "", mo ?? "", d ?? "", hh, mm, type, origin, dest, extra);
+              const hit = keepDest(coded.journeys, dest);
+              if (hit.length) {
+                rows = hit;
+                usedExtra = extra;
               }
             }
-            if (first.length && !listed) {
-              usedExtra = pair.extra;
+            if (rows.length) {
+              first = rows;
+              if (!usedExtra && (fc || tc)) usedExtra = extra;
+              else if (!usedExtra) usedExtra = pair.extra;
               break;
             }
           }
@@ -245,7 +270,7 @@ export const Route = createFileRoute("/api/transit")({
               const extra = await yahooPage(usedFrom, usedTo, y ?? "", mo ?? "", d ?? "", n.hh, n.mm, "1", origin, dest, usedExtra);
               if (extra.journeys.length) {
                 const seen = new Set(first.map(jid));
-                for (const j of extra.journeys) {
+                for (const j of keepDest(extra.journeys, dest)) {
                   const id = jid(j);
                   if (seen.has(id)) continue;
                   seen.add(id);

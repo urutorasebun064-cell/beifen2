@@ -39,9 +39,20 @@ export function AppShell() {
   const selectedKonbini = useMapStore((s) => s.selectedKonbini);
   const selectedPeak = useMapStore((s) => s.selectedPeak);
   const selectedTrain = useMapStore((s) => s.selectedTrain);
+  const followTrainId = useMapStore((s) => s.followTrainId);
+  const searching = useMapStore((s) => s.searching);
+  const mapBusy = useMapStore((s) => s.mapBusy);
   const odptKey = useMapStore((s) => s.odptKey);
   const night = isNightService(tokyoParts(simNow()).minutes);
   const onRide = Boolean((selectedTrain || journey) && !sheetOpen && !selectedStay && !selectedKonbini);
+  const leftDock =
+    mapBusy ||
+    searching ||
+    sheetOpen ||
+    Boolean(journey) ||
+    journeys.length > 0 ||
+    Boolean(selectedTrain) ||
+    Boolean(followTrainId);
 
   useEffect(() => {
     const html = document.documentElement;
@@ -264,19 +275,25 @@ export function AppShell() {
         </div>
       </header>
 
-      <div className="pointer-events-none absolute top-[4.75rem] left-3 z-20 flex flex-col items-start gap-2 pt-[env(safe-area-inset-top)]">
+      <div
+        className={`pointer-events-none absolute top-[4.75rem] left-0 z-20 flex flex-col items-start pt-[env(safe-area-inset-top)] transition-transform duration-300 ease-out ${
+          leftDock ? "-translate-x-[calc(100%-0.42rem)]" : "translate-x-0"
+        }`}
+      >
+        <div className="pointer-events-auto ml-3 flex flex-col items-start gap-2 rounded-r-[var(--radius-lg)] bg-surface/55 py-2 pr-2 pl-1.5 shadow-[var(--shadow-border)] backdrop-blur-md">
         {selectedStay || selectedKonbini ? null : (
-          <div className="pointer-events-auto">
+          <div>
             <QuakePanel />
           </div>
         )}
-        <div className="pointer-events-auto flex flex-row items-start gap-1">
+        <div className="flex flex-row items-start gap-1">
           <PeakCatalog />
           <StayCatalog />
         </div>
-        <div className="pointer-events-auto flex flex-col items-start gap-2">
+        <div className="flex flex-col items-start gap-2">
           <PartyButton />
           <ShopCommunityButton />
+        </div>
         </div>
       </div>
 

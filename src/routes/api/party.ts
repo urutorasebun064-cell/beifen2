@@ -9,10 +9,8 @@ const PARTY_MAX = 5;
 const AWAY_MS = 90 * 1000;
 const MSG_MAX = 70;
 const MSG_DROP = 20;
-const MSG_BONUS = 300;
 const DAY_MS = 24 * 3600 * 1000;
-const LIVE_MS = 3 * DAY_MS;
-const CAP_MS = 7 * DAY_MS;
+const LIVE_MS = 7 * DAY_MS;
 const FILE = join(process.cwd(), ".data", "party-rooms.json");
 const GONE_FILE = join(process.cwd(), ".data", "party-gone.json");
 const VAPID_FILE = join(process.cwd(), ".data", "party-vapid.json");
@@ -398,10 +396,18 @@ function seedTtl(now = Date.now()) {
 
 function bumpTtl(room: Room) {
   room.msgTotal = (room.msgTotal || 0) + 1;
-  if (room.msgTotal % MSG_BONUS !== 0) return;
+  room.expiresAt = Date.now() + LIVE_MS;
+}
+
+function liftSeven(room: Room) {
+  if ((room as { cap7?: 1 }).cap7) return;
+  (room as { cap7?: 1 }).cap7 = 1;
   const now = Date.now();
-  const left = Math.max(0, (room.expiresAt || now) - now);
-  room.expiresAt = now + Math.min(CAP_MS, left + DAY_MS);
+  const born = room.born || 0;
+  const span = (room.expiresAt || 0) - born;
+  const left = (room.expiresAt || 0) - now;
+  const oldClock = born ? span <= 3.5 * DAY_MS : left > 0 && left <= 3 * DAY_MS;
+  if (oldClock) room.expiresAt = now + LIVE_MS;
 }
 
 function expired(room: Room, now = Date.now()) {
@@ -837,6 +843,7 @@ async function getRoom(key: string) {
   if (stillGone(key)) return null;
   if (rooms.has(key)) {
     const r = rooms.get(key) ?? null;
+    if (r) liftSeven(r);
     if (r && expired(r)) {
       await dropRoom(key);
       return null;

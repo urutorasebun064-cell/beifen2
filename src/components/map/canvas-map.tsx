@@ -4532,14 +4532,11 @@ export function CanvasMap() {
             ctx.fill();
           }
           const shop = st.konbiniWalk ? st.selectedKonbini : null;
-          if (shop) {
-            const near = stationsNearPlace(st.stationIndex, shop.lng, shop.lat, 1)[0];
+          if (shop && walk.set) {
             const [sx, sy] = project(shop.lng, shop.lat, camRef.current, w, h);
-            if (near && Number.isFinite(sx) && Number.isFinite(sy)) {
-              const [nx, ny] = project(near.station.lng, near.station.lat, camRef.current, w, h);
-              if (Number.isFinite(nx) && Number.isFinite(ny)) {
-                drawWalkGuide(ctx, nx, ny, sx, sy, KONBINI_META[shop.brand].color, near.km * 1000);
-              }
+            const [nx, ny] = project(walk.lng, walk.lat, camRef.current, w, h);
+            if (Number.isFinite(sx) && Number.isFinite(sy) && Number.isFinite(nx) && Number.isFinite(ny)) {
+              drawWalkGuide(ctx, nx, ny, sx, sy, KONBINI_META[shop.brand].color, haversine([walk.lng, walk.lat], [shop.lng, shop.lat]) * 1000);
             }
           }
           const stayWalkTo = st.stayWalk ? st.selectedStay : null;
@@ -5104,6 +5101,8 @@ export function CanvasMap() {
       if (pointers.size >= 2 && (d.pinching || d.rotating)) {
         mapGesture = true;
         breakAuto();
+        const sPinch = useMapStore.getState();
+        if (!sPinch.mapBusy) sPinch.setMapBusy(true);
         const pts = [...pointers.values()];
         const dist = Math.hypot(pts[0]!.x - pts[1]!.x, pts[0]!.y - pts[1]!.y);
         const mx = (pts[0]!.x + pts[1]!.x) / 2;
@@ -5158,6 +5157,8 @@ export function CanvasMap() {
       if (moved > 22) {
         mapGesture = true;
         breakAuto();
+        const s = useMapStore.getState();
+        if (!s.mapBusy) s.setMapBusy(true);
       }
       if (moved < 22 && !d.mode) return;
       d.mode = "pan";
@@ -5192,6 +5193,9 @@ export function CanvasMap() {
         mapGesture = false;
         baseKey = "";
         setZoomUi(camRef.current.zoom);
+        window.setTimeout(() => {
+          if (pointers.size === 0) useMapStore.getState().setMapBusy(false);
+        }, 240);
       }
     };
 

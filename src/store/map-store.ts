@@ -31,6 +31,8 @@ type MapStore = {
   headingDeg: number | null;
   headingFlat: boolean;
   setHeading: (deg: number | null, flat: boolean) => void;
+  mapBusy: boolean;
+  setMapBusy: (on: boolean) => void;
   selectedStation: StationHit | null;
   selectStation: (station: StationHit | null) => void;
   selectedTrain: Train | null;
@@ -205,6 +207,8 @@ export const useMapStore = create<MapStore>((set, get) => ({
       }
       return { headingDeg, headingFlat };
     }),
+  mapBusy: false,
+  setMapBusy: (mapBusy) => set((s) => (s.mapBusy === mapBusy ? s : { mapBusy })),
   selectedStation: null,
   selectStation: (selectedStation) => set({ selectedStation }),
   selectedTrain: null,

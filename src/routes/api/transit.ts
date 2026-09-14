@@ -178,6 +178,7 @@ async function yahooPage(
     shin: "1",
     ex: "1",
     hb: "1",
+    lb: "1",
   });
   if (extra?.flatlon) qs.set("flatlon", extra.flatlon);
   if (extra?.tlatlon) qs.set("tlatlon", extra.tlatlon);
